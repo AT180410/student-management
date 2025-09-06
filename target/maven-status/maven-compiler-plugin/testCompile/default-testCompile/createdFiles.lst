@@ -1,0 +1,9 @@
+com\studentmanagement\service\ScoreServiceTest.class
+com\studentmanagement\model\SubjectTest.class
+com\studentmanagement\service\SubjectServiceTest.class
+com\studentmanagement\StudentManagementApplicationTest.class
+com\studentmanagement\controller\ScoreControllerTest.class
+com\studentmanagement\controller\StudentControllerTest.class
+com\studentmanagement\model\StudentTest.class
+com\studentmanagement\service\StudentServiceTest.class
+com\studentmanagement\model\ScoreTest.class
