@@ -98,12 +98,22 @@
                 </configuration>
             </plugin>
 
-            <!-- OWASP Dependency Check -->
-            <plugin>
-                <groupId>org.owasp</groupId>
-                <artifactId>dependency-check-maven</artifactId>
-                <version>10.0.4</version>
-            </plugin>
+         <plugin>
+                  <groupId>org.owasp</groupId>
+                  <artifactId>dependency-check-maven</artifactId>
+                  <version>12.1.0</version>
+                  <configuration>
+                                    
+                           <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey>
+                           <nvdApiEnabled>true</nvdApiEnabled>
+                           <nvdEnabled>true</nvdEnabled>                
+                           <dataDirectory>${project.build.directory}/dependency-check-data</dataDirectory>
+                           <cveValidForHours>720</cveValidForHours>
+                           <ossIndexEnabled>true</ossIndexEnabled>
+                           <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
+                           <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
+                  </configuration>
+         </plugin>
         </plugins>
     </build>
 </project>
