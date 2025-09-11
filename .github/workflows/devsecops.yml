@@ -41,13 +41,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: ${{ runner.os }}-dependency-check-${{ hashFiles('**/pom.xml') }}
+          key: ${{ runner.os }}-dependency-check
           restore-keys: |
-            ${{ runner.os }}-dependency-check-
+            ${{ runner.os }}-dependency-check
 
       - run: chmod +x mvnw
 
-      - run: ./mvnw org.owasp:dependency-check-maven:12.1.0:check -Dformat=ALL -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+      - run: ./mvnw org.owasp:dependency-check-maven:check -Dformat=ALL
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
@@ -55,11 +55,6 @@ jobs:
         with:
           name: dependency-check-report
           path: target/dependency-check-report.html
-
-      - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: target/dependency-check-report.sarif
 
   sast:
     name: SAST (SonarCloud)
