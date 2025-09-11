@@ -16,7 +16,8 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-      - run: chmod +x mvnw || true
+      - name: Grant execute permission for mvnw
+        run: chmod +x ./mvnw
       - run: ./mvnw -B clean test
       - run: ./mvnw -B package -DskipTests
       - uses: actions/upload-artifact@v4
@@ -30,6 +31,8 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v4
+      - name: Grant execute permission for mvnw
+        run: chmod +x ./mvnw
       - run: ./mvnw org.owasp:dependency-check-maven:check -Dformat=ALL
       - uses: actions/upload-artifact@v4
         with:
@@ -46,6 +49,8 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
+      - name: Grant execute permission for mvnw
+        run: chmod +x ./mvnw
       - env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
