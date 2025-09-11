@@ -3,24 +3,25 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
          http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
     <modelVersion>4.0.0</modelVersion>
-    
+
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
         <version>3.2.0</version>
         <relativePath/>
     </parent>
-    
+
     <groupId>com.studentmanagement</groupId>
     <artifactId>student-management</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
-    
+
     <properties>
         <java.version>17</java.version>
     </properties>
-    
+
     <dependencies>
         <!-- Main dependencies -->
         <dependency>
@@ -46,7 +47,7 @@
             <scope>runtime</scope>
             <optional>true</optional>
         </dependency>
-        
+
         <!-- Test dependencies -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -69,7 +70,7 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
-    
+
     <build>
         <plugins>
             <!-- Spring Boot Plugin -->
@@ -96,21 +97,24 @@
                         <include>**/*Tests.java</include>
                     </includes>
                 </configuration>
-         <plugin>
-                    <groupId>org.owasp</groupId>
-                    <artifactId>dependency-check-maven</artifactId>
-                    <version>12.1.0</version>
-                    <configuration>
-                      <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey>
-                      <nvdApiEnabled>true</nvdApiEnabled>
-                      <nvdEnabled>true</nvdEnabled>
-                      <dataDirectory>${user.home}/.m2/repository/org/owasp/dependency-check-data</dataDirectory>
-                      <cveValidForHours>720</cveValidForHours>
-                      <ossIndexEnabled>true</ossIndexEnabled>
-                      <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
-                    </configuration>
-                  </plugin>
+            </plugin>
 
+            <!-- Dependency Check Plugin -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>12.1.0</version>
+                <configuration>
+                    <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey>
+                    <nvdApiEnabled>true</nvdApiEnabled>
+                    <nvdEnabled>true</nvdEnabled>
+                    <dataDirectory>${user.home}/.m2/repository/org/owasp/dependency-check-data</dataDirectory>
+                    <cveValidForHours>720</cveValidForHours>
+                    <ossIndexEnabled>true</ossIndexEnabled>
+                    <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
+
 </project>
