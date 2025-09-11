@@ -93,20 +93,22 @@
                     </includes>
                 </configuration>
             </plugin>
-                 <plugin>
+                  <plugin>
                     <groupId>org.owasp</groupId>
                     <artifactId>dependency-check-maven</artifactId>
                     <version>9.0.9</version>
                     <configuration>
+                      <!-- Tắt hoàn toàn NVD để tránh 403 -->
                       <nvdApiEnabled>false</nvdApiEnabled>
-                      <cveValidForHours>720</cveValidForHours>           
+                      <nvdEnabled>false</nvdEnabled>
+                      <cveValidForHours>720</cveValidForHours>
+                  
+                      <!-- Bật các analyzer khác -->
                       <ossIndexEnabled>true</ossIndexEnabled>
                       <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
                       <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
                     </configuration>
                   </plugin>
-
-
         </plugins>
     </build>
 </project>
