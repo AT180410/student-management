@@ -59,11 +59,15 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           ./mvnw -B verify sonar:sonar \
-            -Dsonar.projectKey=AT180410_student-management \
-            -Dsonar.organization=at180410 \
-            -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.login=${SONAR_TOKEN} \
-            -Dsonar.branch.name=${GITHUB_REF_NAME}
+          -Dsonar.projectKey=AT180410_student-management \
+          -Dsonar.organization=at180410 \
+          -Dsonar.host.url=https://sonarcloud.io \
+          -Dsonar.login=${SONAR_TOKEN} \
+          -Dsonar.branch.name=${GITHUB_REF_NAME} \
+          -Dsonar.sources=src/main/java,src/test/java \
+          -Dsonar.tests=src/test/java \
+          -Dsonar.junit.reportPaths=target/surefire-reports \
+          -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
   container-scan:
     name: Container Scan (Trivy)
     runs-on: ubuntu-latest
