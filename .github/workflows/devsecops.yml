@@ -37,9 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: chmod +x ./mvnw
       - name: Run Dependency Check
-        run: ./mvnw org.owasp:dependency-check-maven:check \
-              -Dformat=ALL \
-              -DnvdApiKey=${{ secrets.NVD_API_KEY }}
+        run: ./mvnw dependency-check:check -Dformat=ALL -DnvdApiKey=${{ secrets.NVD_API_KEY }}
       - uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
