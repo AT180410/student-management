@@ -100,20 +100,20 @@
             </plugin>
 
             <!-- Dependency Check Plugin -->
-            <plugin>
-                <groupId>org.owasp</groupId>
-                <artifactId>dependency-check-maven</artifactId>
-                <version>12.1.0</version>
-                <configuration>
-                    <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey>
-                    <nvdApiEnabled>true</nvdApiEnabled>
-                    <nvdEnabled>true</nvdEnabled>
-                    <dataDirectory>${user.home}/.m2/repository/org/owasp/dependency-check-data</dataDirectory>
-                    <cveValidForHours>720</cveValidForHours>
-                    <ossIndexEnabled>true</ossIndexEnabled>
-                    <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
-                </configuration>
-            </plugin>
+           <plugin>
+                    <groupId>org.owasp</groupId>
+                    <artifactId>dependency-check-maven</artifactId>
+                    <version>12.1.0</version>
+                    <configuration>
+                      <!-- Tắt NVD -->
+                      <nvdEnabled>false</nvdEnabled>
+                  
+                      <!-- Dùng các analyzer khác -->
+                      <ossIndexEnabled>true</ossIndexEnabled>
+                      <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
+                      <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
+                    </configuration>
+                  </plugin>
         </plugins>
     </build>
 
