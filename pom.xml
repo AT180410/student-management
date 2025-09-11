@@ -96,8 +96,6 @@
                         <include>**/*Tests.java</include>
                     </includes>
                 </configuration>
-            </plugin>
-
                   <plugin>
                     <groupId>org.owasp</groupId>
                     <artifactId>dependency-check-maven</artifactId>
@@ -110,9 +108,9 @@
                       <cveValidForHours>720</cveValidForHours>
                       <ossIndexEnabled>true</ossIndexEnabled>
                       <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
-                      <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
                     </configuration>
                   </plugin>
+
         </plugins>
     </build>
 </project>
