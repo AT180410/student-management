@@ -98,13 +98,14 @@
                     <artifactId>dependency-check-maven</artifactId>
                     <version>9.0.9</version>
                     <configuration>
-                      <analyzer>
-                        <nvdEnabled>false</nvdEnabled>
-                      </analyzer>
+                      <nvdApiEnabled>false</nvdApiEnabled>
+                      <cveValidForHours>720</cveValidForHours>           
                       <ossIndexEnabled>true</ossIndexEnabled>
+                      <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
                       <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
                     </configuration>
                   </plugin>
+
 
         </plugins>
     </build>
