@@ -27,22 +27,33 @@ jobs:
           name: app-jar
           path: target/*.jar
   sca:
-    name: SCA (Dependency Check)
+    name: SCA (Dependency Check - with cache)
     runs-on: ubuntu-latest
     needs: build
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
       - run: chmod +x mvnw
-      - run: ./mvnw org.owasp:dependency-check-maven:check -Dformat=ALL
+
+      - name: Cache OWASP Dependency-Check data
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: ${{ runner.os }}-dependency-check-v9
+
+      - name: Run Dependency-Check
+        run: ./mvnw org.owasp:dependency-check-maven:9.0.9:check \
+              -Danalyzer.nvd.api.enabled=false
+
       - uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
           path: target/dependency-check-report.html
-          
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: target/dependency-check-report.sarif
+       
   sast:
     name: SAST (SonarCloud)
     runs-on: ubuntu-latest
