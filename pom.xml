@@ -96,7 +96,7 @@
                         <include>**/*Tests.java</include>
                     </includes>
                 </configuration>
-                  <plugin>
+         <plugin>
                     <groupId>org.owasp</groupId>
                     <artifactId>dependency-check-maven</artifactId>
                     <version>12.1.0</version>
