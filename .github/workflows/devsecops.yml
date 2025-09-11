@@ -41,8 +41,9 @@ jobs:
           key: ${{ runner.os }}-dependency-check-v9
 
       - name: Run Dependency-Check
-        run: ./mvnw org.owasp:dependency-check-maven:9.0.9:check \
-              -Danalyzer.nvd.api.enabled=false
+        run: |
+          ./mvnw org.owasp:dependency-check-maven:9.0.9:check \
+            -Danalyzer.nvd.api.enabled=false
 
       - uses: actions/upload-artifact@v4
         with:
@@ -53,7 +54,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: target/dependency-check-report.sarif
-       
+
   sast:
     name: SAST (SonarCloud)
     runs-on: ubuntu-latest
