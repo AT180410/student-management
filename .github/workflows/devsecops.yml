@@ -36,21 +36,27 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-
-      - name: Cache Dependency-Check Data
-        uses: actions/cache@v4
+  
+      # Xóa cache lỗi
+      - name: Clear old dependency-check cache
+        run: rm -rf ~/.m2/repository/org/owasp/dependency-check-data
+  
+      # Cache mới để lần sau nhanh hơn
+      - name: Cache dependency-check data
+        uses: actions/cache@v3
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: ${{ runner.os }}-dependency-check
+          key: ${{ runner.os }}-dependency-check-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-dependency-check
-
+            ${{ runner.os }}-dependency-check-
+  
       - run: chmod +x mvnw
-
+  
+      # Chạy Dependency Check với API key
       - run: ./mvnw org.owasp:dependency-check-maven:check -Dformat=ALL
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-
+  
       - uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
