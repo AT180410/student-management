@@ -103,23 +103,6 @@
                 <groupId>org.owasp</groupId>
                 <artifactId>dependency-check-maven</artifactId>
                 <version>8.4.0</version>
-                <configuration>
-                    <!-- Disable toàn bộ NVD -->
-                    <nvd>
-                        <enabled>false</enabled>
-                    </nvd>
-                    <nvdApiEnabled>false</nvdApiEnabled>
-                    <nvdEnabled>false</nvdEnabled>
-
-                    <!-- Dùng analyzer khác -->
-                    <ossIndexEnabled>true</ossIndexEnabled>
-                    <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
-                    <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
-
-                    <!-- Cache local để không tải lại -->
-                    <dataDirectory>${project.build.directory}/dependency-check-data</dataDirectory>
-                    <cveValidForHours>720</cveValidForHours>
-                </configuration>
             </plugin>
         </plugins>
     </build>
