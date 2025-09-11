@@ -72,16 +72,20 @@
     
     <build>
         <plugins>
+            <!-- Spring Boot Plugin -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
-                 <plugin>
-                    <groupId>org.sonarsource.scanner.maven</groupId>
-                    <artifactId>sonar-maven-plugin</artifactId>
-                    <version>3.9.1.2184</version>
-                  </plugin>
 
+            <!-- Sonar Plugin -->
+            <plugin>
+                <groupId>org.sonarsource.scanner.maven</groupId>
+                <artifactId>sonar-maven-plugin</artifactId>
+                <version>3.9.1.2184</version>
+            </plugin>
+
+            <!-- Surefire Plugin (JUnit) -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
@@ -93,22 +97,30 @@
                     </includes>
                 </configuration>
             </plugin>
-                  <plugin>
-                    <groupId>org.owasp</groupId>
-                    <artifactId>dependency-check-maven</artifactId>
-                    <version>9.0.9</version>
-                    <configuration>
-                      <!-- Tắt hoàn toàn NVD để tránh 403 -->
-                      <nvdApiEnabled>false</nvdApiEnabled>
-                      <nvdEnabled>false</nvdEnabled>
-                      <cveValidForHours>720</cveValidForHours>
-                  
-                      <!-- Bật các analyzer khác -->
-                      <ossIndexEnabled>true</ossIndexEnabled>
-                      <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
-                      <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
-                    </configuration>
-                  </plugin>
+
+            <!-- OWASP Dependency Check -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>9.0.9</version>
+                <configuration>
+                    <!-- Disable toàn bộ NVD -->
+                    <nvd>
+                        <enabled>false</enabled>
+                    </nvd>
+                    <nvdApiEnabled>false</nvdApiEnabled>
+                    <nvdEnabled>false</nvdEnabled>
+
+                    <!-- Dùng analyzer khác -->
+                    <ossIndexEnabled>true</ossIndexEnabled>
+                    <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
+                    <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
+
+                    <!-- Cache local để không tải lại -->
+                    <dataDirectory>${project.build.directory}/dependency-check-data</dataDirectory>
+                    <cveValidForHours>720</cveValidForHours>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>
