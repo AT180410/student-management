@@ -25,35 +25,28 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: app-jar
-          path: target/*.jar
-  sca:
-    name: SCA (Dependency Check - with cache)
+            path: target/*.jar
+   sca:
+    name: SCA (Dependency Check - no NVD)
     runs-on: ubuntu-latest
     needs: build
     steps:
       - uses: actions/checkout@v4
       - run: chmod +x mvnw
-
-      - name: Cache OWASP Dependency-Check data
+  
+      - name: Cache Dependency-Check Data
         uses: actions/cache@v3
         with:
           path: ~/.m2/repository/org/owasp/dependency-check-data
           key: ${{ runner.os }}-dependency-check-v9
-
-      - name: Run Dependency-Check
-        run: |
-          ./mvnw org.owasp:dependency-check-maven:9.0.9:check \
-            -Danalyzer.nvd.api.enabled=false
-
+  
+      - name: Run Dependency Check
+        run: ./mvnw dependency-check:check
+  
       - uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
           path: target/dependency-check-report.html
-
-      - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: target/dependency-check-report.sarif
 
   sast:
     name: SAST (SonarCloud)
