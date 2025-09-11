@@ -16,18 +16,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Ensure mvnw is executable
+        run: chmod +x ./mvnw
+
       - uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
-      - run: chmod +x mvnw || true
+
       - run: ./mvnw -B clean test
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DATABASE_USERNAME: ${{ secrets.DATABASE_USERNAME }}
           DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
           DB_SCHEMA: ${{ github.ref_name == 'test' && secrets.DB_SCHEMA_TEST || secrets.DB_SCHEMA_PROD }}
+
       - run: ./mvnw -B package -DskipTests
+
       - uses: actions/upload-artifact@v4
         with:
           name: app-jar
@@ -39,6 +45,8 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure mvnw is executable
+        run: chmod +x ./mvnw
       - run: ./mvnw org.owasp:dependency-check-maven:check -Dformat=ALL
       - uses: actions/upload-artifact@v4
         with:
@@ -51,6 +59,8 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure mvnw is executable
+        run: chmod +x ./mvnw
       - uses: actions/setup-java@v4
         with:
           java-version: '21'
