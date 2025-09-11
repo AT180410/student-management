@@ -93,6 +93,18 @@
                     </includes>
                 </configuration>
             </plugin>
+                 <plugin>
+                    <groupId>org.owasp</groupId>
+                    <artifactId>dependency-check-maven</artifactId>
+                    <version>9.0.9</version>
+                    <configuration>
+                      <analyzer>
+                        <nvdEnabled>false</nvdEnabled>
+                      </analyzer>
+                      <ossIndexEnabled>true</ossIndexEnabled>
+                      <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
+                    </configuration>
+                  </plugin>
 
         </plugins>
     </build>
