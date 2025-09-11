@@ -98,9 +98,11 @@
                         <artifactId>dependency-check-maven</artifactId>
                         <version>9.0.9</version>
                         <configuration>
-                          <format>ALL</format>
-                          <failBuildOnCVSS>7</failBuildOnCVSS>
-                        </configuration>
+                               <format>ALL</format>
+                               <failBuildOnCVSS>7</failBuildOnCVSS>
+                               <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey>
+                               <nvdApiDelay>6000</nvdApiDelay>
+                           </configuration>
                   </plugin>
         </plugins>
     </build>
