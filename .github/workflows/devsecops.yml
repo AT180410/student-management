@@ -130,7 +130,7 @@ jobs:
           if [ "${GITHUB_REF_NAME}" = "test" ]; then
             echo "DEPLOY_ENV=staging" >> $GITHUB_ENV
             echo "SERVICE_ID=${{ secrets.RENDER_SERVICE_ID_TEST }}" >> $GITHUB_ENV
-            echo "URL=https://student-management-staging.onrender.com" >> $GITHUB_ENV
+            echo "URL=https://student-management-test-vrfb.onrender.com" >> $GITHUB_ENV
           elif [ "${GITHUB_REF_NAME}" = "main" ]; then
             echo "DEPLOY_ENV=production" >> $GITHUB_ENV
             echo "SERVICE_ID=${{ secrets.RENDER_SERVICE_ID_PROD }}" >> $GITHUB_ENV
