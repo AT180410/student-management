@@ -125,6 +125,7 @@ jobs:
         run: |
           echo "🔎 Checking Security Gate..."
           echo "✅ Passed Security Gate"
+
       - name: Set Env
         run: |
           if [ "${GITHUB_REF_NAME}" = "test" ]; then
@@ -136,6 +137,7 @@ jobs:
             echo "SERVICE_ID=${{ secrets.RENDER_SERVICE_ID_PROD }}" >> $GITHUB_ENV
             echo "URL=https://student-management-prod.onrender.com" >> $GITHUB_ENV
           fi
+
       - name: Trigger Render Deploy
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
@@ -143,10 +145,21 @@ jobs:
           curl -X POST "https://api.render.com/deploy/srv-${SERVICE_ID}/deploys" \
             -H "Authorization: Bearer ${RENDER_API_KEY}" \
             -H "Accept: application/json"
+
       - name: Post-deploy health check
         run: |
-          sleep 60
-          curl -f $URL/actuator/health || exit 1
+          echo "⏳ Waiting for app to be ready..."
+          for i in {1..10}; do
+            if curl -fs $URL/actuator/health; then
+              echo "✅ App is healthy!"
+              exit 0
+            fi
+            echo "⚠️ App not ready yet. Retrying in 15s..."
+            sleep 15
+          done
+          echo "❌ Health check failed after retries"
+          exit 1
+
   dast:
     name: DAST (OWASP ZAP)
     runs-on: ubuntu-latest
