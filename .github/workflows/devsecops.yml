@@ -171,16 +171,14 @@ jobs:
       - name: Run OWASP ZAP Baseline
         run: |
           mkdir -p zap-output
-          TARGET=${{ needs.deploy.outputs.url }}
-          echo "⏳ Running ZAP scan on $TARGET ..."
+          echo "⏳ Running ZAP scan on $URL ..."
           docker run --rm -v "$(pwd)/zap-output:/zap/wrk:rw" \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t $TARGET \
+            -t $URL \
             -a -m 5 \
             -r /zap/wrk/zap-report.html \
             -w /zap/wrk/zap-report.md \
             -J /zap/wrk/zap-report.json || true
-          echo "📂 Files in zap-output:"
           ls -l zap-output
       - uses: actions/upload-artifact@v4
         with:
