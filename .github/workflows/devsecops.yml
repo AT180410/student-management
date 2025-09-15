@@ -117,66 +117,76 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: checkov-results.sarif
-
-  security-gate:
+          
+security-gate:
     name: Security Gate
     runs-on: ubuntu-latest
-    needs: [sca, sast, container-scan, iac-scan]
+    needs: [sca, sast, container-scan, iac-scan, dast]
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download SCA report
+        uses: actions/download-artifact@v4
         with:
           name: dependency-check-report
           path: reports
-      - uses: actions/download-artifact@v4
+  
+      - name: Download Sonar (SAST) result
+        uses: actions/download-artifact@v4
+        with:
+          name: sonar-report
+          path: reports
+  
+      - name: Download Trivy report
+        uses: actions/download-artifact@v4
         with:
           name: trivy-report
           path: reports
-      - uses: actions/download-artifact@v4
+  
+      - name: Download Checkov report
+        uses: actions/download-artifact@v4
         with:
           name: checkov-report
           path: reports
-
-      - name: Check Security Gate
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  
+      - name: Download ZAP report
+        uses: actions/download-artifact@v4
+        with:
+          name: zap-report
+          path: reports
+  
+      - name: Generate Security Summary
+        id: summary
         run: |
-          echo "🔎 Checking reports..."
-          failed=0
-
-          # Check Dependency-Check for HIGH/CRITICAL
-          if grep -q -E "HIGH|CRITICAL" reports/dependency-check-report.html; then
-            echo "❌ Found HIGH/CRITICAL vulnerabilities in dependencies"
-            failed=1
-          fi
-
-          # Check Trivy for CRITICAL/HIGH
-          if grep -q -E "CRITICAL|HIGH" reports/trivy-report.sarif; then
-            echo "❌ Found CRITICAL/HIGH vulnerabilities in container"
-            failed=1
-          fi
-
-          # Check Checkov for failed IaC checks
-          if grep -q '"result": "FAILED"' reports/checkov-results.sarif; then
-            echo "❌ Found failed IaC security checks"
-            failed=1
-          fi
-
-          # Check SonarCloud Quality Gate
-          STATUS=$(curl -s -u "${SONAR_TOKEN}:" \
-            "https://sonarcloud.io/api/qualitygates/project_status?projectKey=AT180410_student-management" \
-            | jq -r '.projectStatus.status')
-          echo "SonarCloud Quality Gate: $STATUS"
-          if [ "$STATUS" != "OK" ]; then
-            echo "❌ SonarCloud Quality Gate FAILED"
-            failed=1
-          fi
-
-          if [ $failed -eq 1 ]; then
-            echo "❌ Security Gate FAILED"
+          echo "📊 Generating Security Gate Summary..."
+          mkdir -p reports
+  
+          # Ví dụ parse nhanh số lượng lỗi, bạn có thể refine thêm
+          SCA=$(grep -o "CRITICAL\|HIGH" reports/dependency-check-report.html | wc -l || echo 0)
+          SAST=$(grep -o "ERROR" reports/sonar-report.txt | wc -l || echo 0)
+          CONTAINER=$(grep -o "CRITICAL\|HIGH" reports/trivy-report.sarif | wc -l || echo 0)
+          IAC=$(grep -o "CRITICAL\|HIGH" reports/checkov-results.sarif | wc -l || echo 0)
+          DAST=$(grep -o "High\|Critical" reports/zap-report.json | wc -l || echo 0)
+  
+          echo "| Scan Tool          | Critical/High Issues |"  > reports/final-security-report.md
+          echo "|--------------------|----------------------|" >> reports/final-security-report.md
+          echo "| Dependency Check   | $SCA                 |" >> reports/final-security-report.md
+          echo "| SonarCloud (SAST)  | $SAST                |" >> reports/final-security-report.md
+          echo "| Trivy (Container)  | $CONTAINER           |" >> reports/final-security-report.md
+          echo "| Checkov (IaC)      | $IAC                 |" >> reports/final-security-report.md
+          echo "| ZAP (DAST)         | $DAST                |" >> reports/final-security-report.md
+  
+          TOTAL=$((SCA + SAST + CONTAINER + IAC + DAST))
+          if [ "$TOTAL" -gt 0 ]; then
+            echo "❌ Security Gate FAILED – Found Critical/High issues"
             exit 1
+          else
+            echo "✅ Security Gate PASSED – No Critical/High issues"
           fi
-
-          echo "✅ Security Gate PASSED"
+  
+      - name: Upload Final Security Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-security-report
+          path: reports/final-security-report.md
 
   deploy:
     name: Deploy to Render
