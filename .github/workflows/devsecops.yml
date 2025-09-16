@@ -41,10 +41,18 @@ jobs:
   
       - run: chmod +x ./mvnw
   
-      - name: Run Dependency Check (cached mode)
+      - name: Cache OWASP Dependency-Check data
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: dependency-check-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            dependency-check-${{ runner.os }}-
+  
+      - name: Run Dependency Check (cached, no NVD)
         run: |
           ./mvnw org.owasp:dependency-check-maven:check \
-            -Dformats=HTML,XML,JSON \
+            -Dformat=ALL \
             -Dnvd.api.enabled=false \
             -Dnvd.failOnError=false \
             -Ddependency-check.skipTestScope=true
@@ -320,54 +328,97 @@ jobs:
   
       # 🔄 Parse reports & generate summary table
       - name: Generate Unified Report
-        run: |
-          mkdir -p reports/final
-          echo "# 🔒 Unified Security Report" > reports/final/security-report.md
-          echo "" >> reports/final/security-report.md
-          echo "| Tool | Critical | High | Medium | Low |" >> reports/final/security-report.md
-          echo "|------|----------|------|--------|-----|" >> reports/final/security-report.md
-  
-          # SCA
-          if [ -f reports/sca/dependency-check-report.json ]; then
-            CRIT=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Critical")] | length' reports/sca/dependency-check-report.json)
-            HIGH=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="High")] | length' reports/sca/dependency-check-report.json)
-            MED=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Medium")] | length' reports/sca/dependency-check-report.json)
-            LOW=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Low")] | length' reports/sca/dependency-check-report.json)
-            echo "| SCA (Dependency Check) | $CRIT | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
-          fi
-  
-          # Container (Trivy SARIF)
-          if [ -f reports/container/trivy-report.sarif ]; then
-            CRIT=$(jq '[.runs[].results[] | select(.level=="error" and (.ruleId | test("CRITICAL")))] | length' reports/container/trivy-report.sarif)
-            HIGH=$(jq '[.runs[].results[] | select(.level=="error" and (.ruleId | test("HIGH")))] | length' reports/container/trivy-report.sarif)
-            MED=$(jq '[.runs[].results[] | select(.level=="warning")] | length' reports/container/trivy-report.sarif)
-            LOW=$(jq '[.runs[].results[] | select(.level=="note")] | length' reports/container/trivy-report.sarif)
-            echo "| Container (Trivy) | $CRIT | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
-          fi
-  
-          # IaC (Checkov SARIF)
-          if [ -f reports/iac/checkov-results.sarif ]; then
-            HIGH=$(jq '[.runs[].results[] | select(.level=="error")] | length' reports/iac/checkov-results.sarif)
-            MED=$(jq '[.runs[].results[] | select(.level=="warning")] | length' reports/iac/checkov-results.sarif)
-            LOW=$(jq '[.runs[].results[] | select(.level=="note")] | length' reports/iac/checkov-results.sarif)
-            echo "| IaC (Checkov) | - | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
-          fi
-  
-          # DAST (ZAP)
-          if [ -f reports/dast/zap-report.json ]; then
-            HIGH=$(jq '[.site[].alerts[] | select(.riskcode=="3")] | length' reports/dast/zap-report.json)
-            MED=$(jq '[.site[].alerts[] | select(.riskcode=="2")] | length' reports/dast/zap-report.json)
-            LOW=$(jq '[.site[].alerts[] | select(.riskcode=="1")] | length' reports/dast/zap-report.json)
-            echo "| DAST (OWASP ZAP) | - | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
-          fi
-  
-          echo "" >> reports/final/security-report.md
-          echo "✅ Generated on $(date)" >> reports/final/security-report.md
-  
-      - uses: actions/upload-artifact@v4
-        with:
-          name: unified-security-report
-          path: reports/final/security-report.md
+          run: |
+            mkdir -p reports/final
+            echo "# 🔒 Unified Security Report" > reports/final/security-report.md
+            echo "" >> reports/final/security-report.md
+        
+            # 📊 Summary
+            echo "## 📊 Summary" >> reports/final/security-report.md
+            echo "| Tool | Critical | High | Medium | Low |" >> reports/final/security-report.md
+            echo "|------|----------|------|--------|-----|" >> reports/final/security-report.md
+        
+            #######################
+            # 1. SCA (Dependency Check)
+            #######################
+            if [ -f reports/sca/dependency-check-report.json ]; then
+              CRIT=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Critical")] | length' reports/sca/dependency-check-report.json)
+              HIGH=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="High")] | length' reports/sca/dependency-check-report.json)
+              MED=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Medium")] | length' reports/sca/dependency-check-report.json)
+              LOW=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Low")] | length' reports/sca/dependency-check-report.json)
+              echo "| SCA (Dependency Check) | $CRIT | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
+        
+              echo "" >> reports/final/security-report.md
+              echo "### 🔍 SCA Findings" >> reports/final/security-report.md
+              echo "| Severity | CVE | Package/File | Description |" >> reports/final/security-report.md
+              echo "|----------|-----|--------------|-------------|" >> reports/final/security-report.md
+              jq -r '.dependencies[] | select(.vulnerabilities) |
+                .fileName as $f |
+                .vulnerabilities[] |
+                "| \(.severity) | \(.name) | \($f) | \(.description)"' reports/sca/dependency-check-report.json \
+                >> reports/final/security-report.md
+            fi
+        
+            #######################
+            # 2. Container (Trivy)
+            #######################
+            if [ -f reports/container/trivy-report.sarif ]; then
+              CRIT=$(jq '[.runs[].results[] | select(.ruleId | test("CRITICAL"))] | length' reports/container/trivy-report.sarif)
+              HIGH=$(jq '[.runs[].results[] | select(.ruleId | test("HIGH"))] | length' reports/container/trivy-report.sarif)
+              MED=$(jq '[.runs[].results[] | select(.level=="warning")] | length' reports/container/trivy-report.sarif)
+              LOW=$(jq '[.runs[].results[] | select(.level=="note")] | length' reports/container/trivy-report.sarif)
+              echo "| Container (Trivy) | $CRIT | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
+        
+              echo "" >> reports/final/security-report.md
+              echo "### 🐳 Trivy Findings" >> reports/final/security-report.md
+              echo "| Severity | Rule ID | Message |" >> reports/final/security-report.md
+              echo "|----------|---------|---------|" >> reports/final/security-report.md
+              jq -r '.runs[].results[] |
+                "| \(.level) | \(.ruleId) | \(.message.text)"' reports/container/trivy-report.sarif \
+                >> reports/final/security-report.md
+            fi
+        
+            #######################
+            # 3. IaC (Checkov)
+            #######################
+            if [ -f reports/iac/checkov-results.sarif ]; then
+              HIGH=$(jq '[.runs[].results[] | select(.level=="error")] | length' reports/iac/checkov-results.sarif)
+              MED=$(jq '[.runs[].results[] | select(.level=="warning")] | length' reports/iac/checkov-results.sarif)
+              LOW=$(jq '[.runs[].results[] | select(.level=="note")] | length' reports/iac/checkov-results.sarif)
+              echo "| IaC (Checkov) | - | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
+        
+              echo "" >> reports/final/security-report.md
+              echo "### 🏗️ Checkov Findings" >> reports/final/security-report.md
+              echo "| Severity | Rule ID | Message |" >> reports/final/security-report.md
+              echo "|----------|---------|---------|" >> reports/final/security-report.md
+              jq -r '.runs[].results[] |
+                "| \(.level) | \(.ruleId) | \(.message.text)"' reports/iac/checkov-results.sarif \
+                >> reports/final/security-report.md
+            fi
+        
+            #######################
+            # 4. DAST (ZAP)
+            #######################
+            if [ -f reports/dast/zap-report.json ]; then
+              HIGH=$(jq '[.site[].alerts[] | select(.riskcode=="3")] | length' reports/dast/zap-report.json)
+              MED=$(jq '[.site[].alerts[] | select(.riskcode=="2")] | length' reports/dast/zap-report.json)
+              LOW=$(jq '[.site[].alerts[] | select(.riskcode=="1")] | length' reports/dast/zap-report.json)
+              echo "| DAST (OWASP ZAP) | - | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
+        
+              echo "" >> reports/final/security-report.md
+              echo "### 🌐 ZAP Findings" >> reports/final/security-report.md
+              echo "| Risk | Alert | URL | Description |" >> reports/final/security-report.md
+              echo "|------|-------|-----|-------------|" >> reports/final/security-report.md
+              jq -r '.site[].alerts[] |
+                . as $a |
+                ($a.instances[0].uri // "-") as $u |
+                "| \($a.riskdesc) | \($a.alert) | \($u) | \($a.desc)"' reports/dast/zap-report.json \
+                >> reports/final/security-report.md
+            fi
+        
+            echo "" >> reports/final/security-report.md
+            echo "✅ Generated on $(date)" >> reports/final/security-report.md
+
 
   notify:
     name: Notify Discord
