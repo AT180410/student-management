@@ -325,6 +325,10 @@ jobs:
         
             echo "" >> reports/final/security-report.md
             echo "✅ Generated on $(date)" >> reports/final/security-report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unified-security-report
+          path: reports/final/security-report.md
 
 
   notify:
