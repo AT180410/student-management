@@ -38,19 +38,21 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
       - run: chmod +x ./mvnw
-
+  
       # 🚀 Run Dependency-Check (skip NVD để chạy nhanh)
       - name: Run Dependency Check (fast mode, no NVD)
         run: ./mvnw org.owasp:dependency-check-maven:check \
-               -Dformat=ALL \
-               -DnvdApiEnabled=false \
+               -Dformats=HTML,XML,JSON \
                -Danalyzer.nvd=false \
                -Ddependency-check.skipTestScope=true
-
+  
       - uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
-          path: target/dependency-check-report.html
+          path: |
+            target/dependency-check-report.html
+            target/dependency-check-report.xml
+            target/dependency-check-report.json
 
   sast:
     name: SAST (SonarCloud)
