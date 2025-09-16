@@ -28,7 +28,7 @@ jobs:
           path: target/*.jar
 
   sca:
-    name: SCA (Dependency Check - Fast, No NVD)
+    name: SCA (Dependency Check - Full with Cache)
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -39,11 +39,19 @@ jobs:
           distribution: 'temurin'
       - run: chmod +x ./mvnw
   
-      # 🚀 Run Dependency-Check (skip NVD để chạy nhanh)
-      - name: Run Dependency Check (fast mode, no NVD)
+      # ⚡ Cache NVD database để không tải lại mỗi lần
+      - name: Cache OWASP Dependency-Check Data
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: ${{ runner.os }}-dependency-check
+          restore-keys: |
+            ${{ runner.os }}-dependency-check
+  
+      - name: Run Dependency Check (with NVD)
         run: ./mvnw org.owasp:dependency-check-maven:check \
                -Dformats=HTML,XML,JSON \
-               -Danalyzer.nvd=false \
+               -Dnvd.api.validForHours=24 \
                -Ddependency-check.skipTestScope=true
   
       - uses: actions/upload-artifact@v4
