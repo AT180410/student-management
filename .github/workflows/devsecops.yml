@@ -292,6 +292,82 @@ jobs:
         with:
           name: zap-report
           path: zap-output/*
+  report:
+    name: 📊 Unified Security Report
+    runs-on: ubuntu-latest
+    needs: [sca, sast, container-scan, iac-scan, dast]
+    steps:
+      - uses: actions/checkout@v4
+  
+      # ⬇️ Download all reports
+      - name: Download reports
+        uses: actions/download-artifact@v4
+        with:
+          name: dependency-check-report
+          path: reports/sca
+      - uses: actions/download-artifact@v4
+        with:
+          name: trivy-report
+          path: reports/container
+      - uses: actions/download-artifact@v4
+        with:
+          name: checkov-report
+          path: reports/iac
+      - uses: actions/download-artifact@v4
+        with:
+          name: zap-report
+          path: reports/dast
+  
+      # 🔄 Parse reports & generate summary table
+      - name: Generate Unified Report
+        run: |
+          mkdir -p reports/final
+          echo "# 🔒 Unified Security Report" > reports/final/security-report.md
+          echo "" >> reports/final/security-report.md
+          echo "| Tool | Critical | High | Medium | Low |" >> reports/final/security-report.md
+          echo "|------|----------|------|--------|-----|" >> reports/final/security-report.md
+  
+          # SCA
+          if [ -f reports/sca/dependency-check-report.json ]; then
+            CRIT=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Critical")] | length' reports/sca/dependency-check-report.json)
+            HIGH=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="High")] | length' reports/sca/dependency-check-report.json)
+            MED=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Medium")] | length' reports/sca/dependency-check-report.json)
+            LOW=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Low")] | length' reports/sca/dependency-check-report.json)
+            echo "| SCA (Dependency Check) | $CRIT | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
+          fi
+  
+          # Container (Trivy SARIF)
+          if [ -f reports/container/trivy-report.sarif ]; then
+            CRIT=$(jq '[.runs[].results[] | select(.level=="error" and (.ruleId | test("CRITICAL")))] | length' reports/container/trivy-report.sarif)
+            HIGH=$(jq '[.runs[].results[] | select(.level=="error" and (.ruleId | test("HIGH")))] | length' reports/container/trivy-report.sarif)
+            MED=$(jq '[.runs[].results[] | select(.level=="warning")] | length' reports/container/trivy-report.sarif)
+            LOW=$(jq '[.runs[].results[] | select(.level=="note")] | length' reports/container/trivy-report.sarif)
+            echo "| Container (Trivy) | $CRIT | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
+          fi
+  
+          # IaC (Checkov SARIF)
+          if [ -f reports/iac/checkov-results.sarif ]; then
+            HIGH=$(jq '[.runs[].results[] | select(.level=="error")] | length' reports/iac/checkov-results.sarif)
+            MED=$(jq '[.runs[].results[] | select(.level=="warning")] | length' reports/iac/checkov-results.sarif)
+            LOW=$(jq '[.runs[].results[] | select(.level=="note")] | length' reports/iac/checkov-results.sarif)
+            echo "| IaC (Checkov) | - | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
+          fi
+  
+          # DAST (ZAP)
+          if [ -f reports/dast/zap-report.json ]; then
+            HIGH=$(jq '[.site[].alerts[] | select(.riskcode=="3")] | length' reports/dast/zap-report.json)
+            MED=$(jq '[.site[].alerts[] | select(.riskcode=="2")] | length' reports/dast/zap-report.json)
+            LOW=$(jq '[.site[].alerts[] | select(.riskcode=="1")] | length' reports/dast/zap-report.json)
+            echo "| DAST (OWASP ZAP) | - | $HIGH | $MED | $LOW |" >> reports/final/security-report.md
+          fi
+  
+          echo "" >> reports/final/security-report.md
+          echo "✅ Generated on $(date)" >> reports/final/security-report.md
+  
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unified-security-report
+          path: reports/final/security-report.md
 
   notify:
     name: Notify Discord
