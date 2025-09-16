@@ -235,7 +235,7 @@ jobs:
   
       # 🔄 Parse reports & generate summary table
       - name: Generate Unified Report
-          run: |
+        run: |
             mkdir -p reports/final
             echo "# 🔒 Unified Security Report" > reports/final/security-report.md
             echo "" >> reports/final/security-report.md
