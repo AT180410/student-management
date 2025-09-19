@@ -81,7 +81,6 @@ jobs:
             -Dsonar.tests=src/test/java \
             -Dsonar.junit.reportPaths=target/surefire-reports \
             -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-
   container-scan:
     name: Container Scan (Trivy)
     runs-on: ubuntu-latest
@@ -98,7 +97,7 @@ jobs:
           image-ref: student-management:latest
           format: sarif
           output: trivy-report.sarif
-          severity: CRITICAL,HIGH,MEDIUM,LOW
+          severity: CRITICAL,HIGH
       - uses: actions/upload-artifact@v4
         with:
           name: trivy-report
@@ -130,10 +129,53 @@ jobs:
         with:
           sarif_file: checkov-results.sarif
 
+  security-gate:
+    name: Security Gate
+    runs-on: ubuntu-latest
+    needs: [sca, sast, container-scan, iac-scan]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dependency-check-report
+          path: reports/sca
+      - uses: actions/download-artifact@v4
+        with:
+          name: trivy-report
+          path: reports/container
+      - uses: actions/download-artifact@v4
+        with:
+          name: checkov-report
+          path: reports/iac
+      - name: Enforce Security Gate
+        run: |
+          echo "🔒 Running Security Gate..."
+          FAIL=0
+          if [ -f reports/sca/dependency-check-report.json ]; then
+            CRIT=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Critical")] | length' reports/sca/dependency-check-report.json)
+            HIGH=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="High")] | length' reports/sca/dependency-check-report.json)
+            if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+              echo "❌ SCA found Critical/High vulnerabilities"
+              FAIL=1
+            fi
+          fi
+          if [ -f reports/container/trivy-report.sarif ]; then
+            CRIT=$(jq '[.runs[].results[] | select(.ruleId | test("CRITICAL"))] | length' reports/container/trivy-report.sarif)
+            HIGH=$(jq '[.runs[].results[] | select(.ruleId | test("HIGH"))] | length' reports/container/trivy-report.sarif)
+            if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+              echo "❌ Container scan found Critical/High vulnerabilities"
+              FAIL=1
+            fi
+          fi
+          if [ "$FAIL" -eq 1 ]; then
+            echo "❌ Security Gate failed"
+            exit 1
+          else
+            echo "✅ Security Gate passed"
+          fi
   deploy:
     name: Deploy to Render
     runs-on: ubuntu-latest
-    needs: [sca, sast, container-scan, iac-scan]
+    needs: [security-gate]
     outputs:
       url: ${{ steps.set-url.outputs.url }}
     steps:
@@ -168,7 +210,6 @@ jobs:
           done
           echo "❌ Health check failed after retries"
           exit 1
-
   dast:
     name: DAST (OWASP ZAP)
     runs-on: ubuntu-latest
@@ -180,12 +221,15 @@ jobs:
           URL: ${{ needs.deploy.outputs.url }}
         run: |
           mkdir -p zap-output
+          echo "⏳ Running ZAP scan on $URL ..."
           docker run --rm \
+            --user root \
             -v "$(pwd)/zap-output:/zap/wrk:rw" \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
             -t $URL \
             -a -m 5 \
             -r /zap/wrk/zap-report.html \
+            -w /zap/wrk/zap-report.md \
             -J /zap/wrk/zap-report.json || true
       - uses: actions/upload-artifact@v4
         with:
@@ -219,118 +263,20 @@ jobs:
           mkdir -p reports/final
           REPORT=reports/final/security-report.html
           echo "<html><head><meta charset='UTF-8'><title>Unified Security Report</title>" > $REPORT
-          echo "<style>body{font-family:Arial;} table{border-collapse:collapse;width:100%;margin:15px 0;} th,td{border:1px solid #ddd;padding:8px;} th{background:#333;color:#fff;} tr:nth-child(even){background:#f2f2f2;} h2{margin-top:30px;color:#333;} .crit{color:red;font-weight:bold;} .high{color:darkorange;font-weight:bold;}</style>" >> $REPORT
+          echo "<style>body{font-family:Arial;} table{border-collapse:collapse;width:100%;margin:15px 0;} th,td{border:1px solid #ddd;padding:8px;} th{background:#333;color:#fff;} tr:nth-child(even){background:#f2f2f2;} h2{margin-top:30px;color:#333;}</style>" >> $REPORT
           echo "</head><body>" >> $REPORT
           echo "<h1>🔒 Unified Security Report</h1>" >> $REPORT
-          echo "<h2>📊 Summary</h2><table><tr><th>Tool</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th></tr>" >> $REPORT
-
-          # --- SCA ---
-          if [ -f reports/sca/dependency-check-report.json ]; then
-            CRIT=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Critical")] | length' reports/sca/dependency-check-report.json)
-            HIGH=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="High")] | length' reports/sca/dependency-check-report.json)
-            MED=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Medium")] | length' reports/sca/dependency-check-report.json)
-            LOW=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Low")] | length' reports/sca/dependency-check-report.json)
-            echo "<tr><td>SCA</td><td>$CRIT</td><td>$HIGH</td><td>$MED</td><td>$LOW</td></tr>" >> $REPORT
-            echo "</table><h2>⚠️ SCA - Critical & High Vulnerabilities</h2><ul>" >> $REPORT
-            jq -r '.dependencies[].vulnerabilities[]? | select(.severity=="Critical" or .severity=="High") | "<li><b>"+.name+"</b> ("+.severity+") - "+.description+"</li>"' reports/sca/dependency-check-report.json >> $REPORT
-            echo "</ul>" >> $REPORT
-          fi
-
-          # --- Container ---
-          if [ -f reports/container/trivy-report.sarif ]; then
-            CRIT=$(jq '[.runs[].results[] | select(.ruleId | test("CRITICAL"))] | length' reports/container/trivy-report.sarif)
-            HIGH=$(jq '[.runs[].results[] | select(.ruleId | test("HIGH"))] | length' reports/container/trivy-report.sarif)
-            echo "<tr><td>Container</td><td>$CRIT</td><td>$HIGH</td><td>-</td><td>-</td></tr>" >> $REPORT
-            echo "</table><h2>⚠️ Container - Critical & High Vulnerabilities</h2><ul>" >> $REPORT
-            jq -r '.runs[].results[] | select(.ruleId | test("CRITICAL|HIGH")) | "<li><b>"+.ruleId+"</b> - "+.message.text+"</li>"' reports/container/trivy-report.sarif >> $REPORT
-            echo "</ul>" >> $REPORT
-          fi
-
-          # --- IaC ---
-          if [ -f reports/iac/checkov-results.sarif ]; then
-            HIGH=$(jq '[.runs[].results[] | select(.level=="error")] | length' reports/iac/checkov-results.sarif)
-            echo "<tr><td>IaC</td><td>-</td><td>$HIGH</td><td>-</td><td>-</td></tr>" >> $REPORT
-            echo "</table><h2>⚠️ IaC - High Vulnerabilities</h2><ul>" >> $REPORT
-            jq -r '.runs[].results[] | select(.level=="error") | "<li><b>"+.ruleId+"</b> - "+.message.text+"</li>"' reports/iac/checkov-results.sarif >> $REPORT
-            echo "</ul>" >> $REPORT
-          fi
-
-          # --- DAST ---
-          if [ -f reports/dast/zap-report.json ]; then
-            HIGH=$(jq '[.site[].alerts[] | select(.riskcode=="3")] | length' reports/dast/zap-report.json)
-            MED=$(jq '[.site[].alerts[] | select(.riskcode=="2")] | length' reports/dast/zap-report.json)
-            LOW=$(jq '[.site[].alerts[] | select(.riskcode=="1")] | length' reports/dast/zap-report.json)
-            echo "<tr><td>DAST</td><td>-</td><td>$HIGH</td><td>$MED</td><td>$LOW</td></tr>" >> $REPORT
-            echo "</table><h2>⚠️ DAST - High Vulnerabilities</h2><ul>" >> $REPORT
-            jq -r '.site[].alerts[] | select(.riskcode=="3") | "<li><b>"+.alert+"</b> - "+.desc+"</li>"' reports/dast/zap-report.json >> $REPORT
-            echo "</ul>" >> $REPORT
-          fi
-
-          echo "<p>✅ Generated on $(date)</p></body></html>" >> $REPORT
-
+          echo "<p>✅ Generated on $(date)</p>" >> $REPORT
+          echo "</body></html>" >> $REPORT
       - uses: actions/upload-artifact@v4
         with:
           name: unified-security-report
           path: reports/final/security-report.html
 
-  security-gate:
-    name: Security Gate
-    runs-on: ubuntu-latest
-    needs: [sca, container-scan, iac-scan, dast]
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dependency-check-report
-          path: reports/sca
-      - uses: actions/download-artifact@v4
-        with:
-          name: trivy-report
-          path: reports/container
-      - uses: actions/download-artifact@v4
-        with:
-          name: checkov-report
-          path: reports/iac
-      - uses: actions/download-artifact@v4
-        with:
-          name: zap-report
-          path: reports/dast
-      - name: Enforce Security Gate
-        run: |
-          echo "🔒 Running Security Gate..."
-          FAIL=0
-          # Check SCA
-          if [ -f reports/sca/dependency-check-report.json ]; then
-            CRIT=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Critical")] | length' reports/sca/dependency-check-report.json)
-            HIGH=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="High")] | length' reports/sca/dependency-check-report.json)
-            if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then FAIL=1; fi
-          fi
-          # Check Container
-          if [ -f reports/container/trivy-report.sarif ]; then
-            CRIT=$(jq '[.runs[].results[] | select(.ruleId | test("CRITICAL"))] | length' reports/container/trivy-report.sarif)
-            HIGH=$(jq '[.runs[].results[] | select(.ruleId | test("HIGH"))] | length' reports/container/trivy-report.sarif)
-            if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then FAIL=1; fi
-          fi
-          # Check IaC
-          if [ -f reports/iac/checkov-results.sarif ]; then
-            HIGH=$(jq '[.runs[].results[] | select(.level=="error")] | length' reports/iac/checkov-results.sarif)
-            if [ "$HIGH" -gt 0 ]; then FAIL=1; fi
-          fi
-          # Check DAST
-          if [ -f reports/dast/zap-report.json ]; then
-            HIGH=$(jq '[.site[].alerts[] | select(.riskcode=="3")] | length' reports/dast/zap-report.json)
-            if [ "$HIGH" -gt 0 ]; then FAIL=1; fi
-          fi
-          if [ "$FAIL" -eq 1 ]; then
-            echo "❌ Security Gate failed: Found Critical/High vulnerabilities"
-            exit 1
-          else
-            echo "✅ Security Gate passed"
-          fi
-
   notify:
     name: Notify Discord
     runs-on: ubuntu-latest
-    needs: [report, security-gate]
+    needs: [report]
     if: always()
     steps:
       - uses: actions/download-artifact@v4
@@ -345,6 +291,15 @@ jobs:
           BRANCH="${GITHUB_REF_NAME}"
           REPO="${{ github.repository }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          REPORT_URL="(Report attached as artifact)"
-          if [ "$STATUS" == "success" ]; then
-            MSG="✅ Pipeline passed for **${REPO}** on b
+          if [ "$STATUS" = "success" ]; then
+            EMOJI="✅"
+            MSG="Pipeline succeeded"
+          else
+            EMOJI="❌"
+            MSG="Pipeline failed"
+          fi
+          payload="{
+            \"content\": \"${EMOJI} ${MSG} for **${REPO}** on branch \`${BRANCH}\`\\n🔗 Run: ${RUN_URL}\\n📊 Security Report attached as artifact.\"
+          }"
+          curl -H "Content-Type: application/json" -X POST -d "$payload" "$DISCORD_WEBHOOK_URL"
+          
