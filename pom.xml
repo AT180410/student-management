@@ -36,22 +36,21 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
-         <dependency>
-             <groupId>org.postgresql</groupId>
-             <artifactId>postgresql</artifactId>
-             <version>42.7.3</version>
-         </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.3</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-devtools</artifactId>
             <scope>runtime</scope>
             <optional>true</optional>
         </dependency>
-         <dependency>
-           <groupId>org.springframework.boot</groupId>
-           <artifactId>spring-boot-starter-actuator</artifactId>
-         </dependency>
-
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
 
         <!-- Test dependencies -->
         <dependency>
@@ -75,15 +74,27 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
-         <dependencyManagement>
-           <dependencies>
-             <dependency>
-               <groupId>org.apache.tomcat.embed</groupId>
-               <artifactId>tomcat-embed-core</artifactId>
-               <version>10.1.40</version>
-             </dependency>
-           </dependencies>
-         </dependencyManagement>
+
+    <!-- Override Tomcat to secure version -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-core</artifactId>
+                <version>10.1.40</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-el</artifactId>
+                <version>10.1.40</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-websocket</artifactId>
+                <version>10.1.40</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <build>
         <plugins>
@@ -114,20 +125,19 @@
             </plugin>
 
             <!-- Dependency Check Plugin -->
-           <plugin>
-                    <groupId>org.owasp</groupId>
-                    <artifactId>dependency-check-maven</artifactId>
-                    <version>12.1.0</version>
-                    <configuration>
-                      <!-- Tắt NVD -->
-                      <nvdEnabled>false</nvdEnabled>
-                  
-                      <!-- Dùng các analyzer khác -->
-                      <ossIndexEnabled>true</ossIndexEnabled>
-                      <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
-                      <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
-                    </configuration>
-                  </plugin>
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>12.1.0</version>
+                <configuration>
+                    <!-- Tắt NVD -->
+                    <nvdEnabled>false</nvdEnabled>
+                    <!-- Dùng các analyzer khác -->
+                    <ossIndexEnabled>true</ossIndexEnabled>
+                    <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
+                    <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 
