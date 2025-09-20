@@ -165,7 +165,6 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          # Kiểm tra Quality Gate từ SonarCloud API
           response=$(curl -s -u "${SONAR_TOKEN}:" \
             "https://sonarcloud.io/api/project_status?projectKey=AT180410_student-management&branch=${GITHUB_REF_NAME}")
           status=$(echo "$response" | jq -r '.projectStatus.status')
@@ -182,58 +181,62 @@ jobs:
           echo "🔒 Analyzing Security Reports..."
           FAIL=0
           
-          # Phân tích SCA results (OWASP Dependency-Check)
+          # 📦 SCA results (OWASP Dependency-Check)
           if [ -f reports/sca/dependency-check-report.json ]; then
             echo "📦 Analyzing SCA results..."
-            # Sử dụng jq để phân tích JSON chính xác
-            CRITICAL_COUNT=$(jq -r '.dependencies[]?.vulnerabilities[]? | select(.severity == "CRITICAL" or .severity == "Critical") | .name' reports/sca/dependency-check-report.json | wc -l)
-            HIGH_COUNT=$(jq -r '.dependencies[]?.vulnerabilities[]? | select(.severity == "HIGH" or .severity == "High") | .name' reports/sca/dependency-check-report.json | wc -l)
+            CRITICAL_COUNT=$(jq '[.dependencies[]?.vulnerabilities[]? | select((.severity|ascii_upcase) == "CRITICAL")] | length' reports/sca/dependency-check-report.json)
+            HIGH_COUNT=$(jq '[.dependencies[]?.vulnerabilities[]? | select((.severity|ascii_upcase) == "HIGH")] | length' reports/sca/dependency-check-report.json)
             
             if [ "$CRITICAL_COUNT" -gt 0 ] || [ "$HIGH_COUNT" -gt 0 ]; then
               echo "❌ SCA found $CRITICAL_COUNT Critical and $HIGH_COUNT High vulnerabilities"
-              jq -r '.dependencies[]?.vulnerabilities[]? | select(.severity == "CRITICAL" or .severity == "Critical" or .severity == "HIGH" or .severity == "High") | "\(.name) - \(.severity) - \(.description)"' reports/sca/dependency-check-report.json | head -5
+              jq -r '.dependencies[]?.vulnerabilities[]? 
+                | select((.severity|ascii_upcase) == "CRITICAL" or (.severity|ascii_upcase) == "HIGH") 
+                | "\(.name // "N/A") - \(.severity)"' reports/sca/dependency-check-report.json | head -5
               FAIL=1
             fi
           fi
   
-          # Phân tích Container Scan results (Trivy SARIF format)
+          # 🐳 Container Scan (Trivy SARIF)
           if [ -f reports/container/trivy-report.sarif ]; then
             echo "🐳 Analyzing Container Scan results..."
-            # Phân tích SARIF format chính xác
-            CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.level == "error") | .ruleId' reports/container/trivy-report.sarif | wc -l)
-            HIGH_COUNT=$(jq -r '.runs[0].results[]? | select(.level == "warning") | .ruleId' reports/container/trivy-report.sarif | wc -l)
+            CRITICAL_COUNT=$(jq '[.runs[0].results[]? | select(.level == "error")] | length' reports/container/trivy-report.sarif)
+            HIGH_COUNT=$(jq '[.runs[0].results[]? | select(.level == "warning")] | length' reports/container/trivy-report.sarif)
             
             if [ "$CRITICAL_COUNT" -gt 0 ] || [ "$HIGH_COUNT" -gt 0 ]; then
               echo "❌ Container scan found $CRITICAL_COUNT Critical and $HIGH_COUNT High vulnerabilities"
-              jq -r '.runs[0].results[]? | select(.level == "error" or .level == "warning") | "\(.ruleId) - \(.level) - \(.message.text)"' reports/container/trivy-report.sarif | head -5
+              jq -r '.runs[0].results[]? 
+                | select(.level == "error" or .level == "warning") 
+                | "\(.ruleId) - \(.level) - \(.message.text)"' reports/container/trivy-report.sarif | head -5
               FAIL=1
             fi
           fi
   
-          # Phân tích IaC Scan results (Checkov SARIF format)
+          # ☁️ IaC Scan (Checkov SARIF)
           if [ -f reports/iac/checkov-results.sarif ]; then
             echo "☁️ Analyzing IaC Scan results..."
-            # Checkov sử dụng level: error = Critical, warning = High
-            CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.level == "error") | .ruleId' reports/iac/checkov-results.sarif | wc -l)
-            HIGH_COUNT=$(jq -r '.runs[0].results[]? | select(.level == "warning") | .ruleId' reports/iac/checkov-results.sarif | wc -l)
+            CRITICAL_COUNT=$(jq '[.runs[0].results[]? | select(.level == "error")] | length' reports/iac/checkov-results.sarif)
+            HIGH_COUNT=$(jq '[.runs[0].results[]? | select(.level == "warning")] | length' reports/iac/checkov-results.sarif)
             
             if [ "$CRITICAL_COUNT" -gt 0 ] || [ "$HIGH_COUNT" -gt 0 ]; then
               echo "❌ IaC scan found $CRITICAL_COUNT Critical and $HIGH_COUNT High vulnerabilities"
-              jq -r '.runs[0].results[]? | select(.level == "error" or .level == "warning") | "\(.ruleId) - \(.level) - \(.message.text)"' reports/iac/checkov-results.sarif | head -5
+              jq -r '.runs[0].results[]? 
+                | select(.level == "error" or .level == "warning") 
+                | "\(.ruleId) - \(.level) - \(.message.text)"' reports/iac/checkov-results.sarif | head -5
               FAIL=1
             fi
           fi
   
-          # Kiểm tra DAST results nếu có
+          # 🌐 DAST results (OWASP ZAP)
           if [ -f reports/dast/zap-report.json ]; then
             echo "🌐 Analyzing DAST results..."
-            # ZAP risk code: 3 = High, 4 = Critical
-            CRITICAL_COUNT=$(jq -r '.site[]?.alerts[]? | select(.riskcode == "4") | .alert' reports/dast/zap-report.json | wc -l)
-            HIGH_COUNT=$(jq -r '.site[]?.alerts[]? | select(.riskcode == "3") | .alert' reports/dast/zap-report.json | wc -l)
+            CRITICAL_COUNT=$(jq '[.site[]?.alerts[]? | select(.riskcode == "4")] | length' reports/dast/zap-report.json)
+            HIGH_COUNT=$(jq '[.site[]?.alerts[]? | select(.riskcode == "3")] | length' reports/dast/zap-report.json)
             
             if [ "$CRITICAL_COUNT" -gt 0 ] || [ "$HIGH_COUNT" -gt 0 ]; then
               echo "❌ DAST found $CRITICAL_COUNT Critical and $HIGH_COUNT High vulnerabilities"
-              jq -r '.site[]?.alerts[]? | select(.riskcode == "4" or .riskcode == "3") | "\(.alert) - Risk: \(.riskcode) - \(.desc)"' reports/dast/zap-report.json | head -5
+              jq -r '.site[]?.alerts[]? 
+                | select(.riskcode == "4" or .riskcode == "3") 
+                | "\(.alert) - Risk: \(.riskcode)"' reports/dast/zap-report.json | head -5
               FAIL=1
             fi
           fi
