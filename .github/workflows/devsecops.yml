@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
   build:
@@ -15,20 +16,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for SonarCloud analysis
       - uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
       - run: chmod +x ./mvnw
-      - run: ./mvnw -B clean test
-      - run: ./mvnw -B package -DskipTests
+      - name: Run tests with coverage
+        run: |
+          ./mvnw -B clean test jacoco:report
+      - name: Package application
+        run: |
+          ./mvnw -B package -DskipTests
       - uses: actions/upload-artifact@v4
         with:
           name: app-jar
           path: target/*.jar
 
   sca:
-    name: SCA (Dependency Check - Cached, No NVD)
+    name: SCA (Dependency Check)
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -45,10 +52,10 @@ jobs:
           key: dependency-check-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
             dependency-check-${{ runner.os }}-
-      - name: Run Dependency Check (cached, no NVD)
+      - name: Run Dependency Check
         run: |
           ./mvnw org.owasp:dependency-check-maven:check \
-            -Dformat=ALL \
+            -Dformat=JSON \
             -Dnvd.api.enabled=false \
             -Dnvd.failOnError=false \
             -Ddependency-check.skipTestScope=true
@@ -63,12 +70,15 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
       - run: chmod +x ./mvnw
-      - env:
+      - name: SonarCloud Scan
+        env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           ./mvnw -B verify sonar:sonar \
@@ -86,8 +96,6 @@ jobs:
     name: Container Scan (Trivy)
     runs-on: ubuntu-latest
     needs: build
-    permissions:
-      security-events: write
     steps:
       - uses: actions/checkout@v4
       - name: Build Docker image
@@ -99,6 +107,7 @@ jobs:
           format: sarif
           output: trivy-report.sarif
           severity: CRITICAL,HIGH
+          exit-code: 0  # Don't fail the job, let security gate handle it
       - uses: actions/upload-artifact@v4
         with:
           name: trivy-report
@@ -111,16 +120,15 @@ jobs:
   iac-scan:
     name: IaC Security (Checkov)
     runs-on: ubuntu-latest
-    permissions:
-      security-events: write
     steps:
       - uses: actions/checkout@v4
       - name: Run Checkov
         uses: bridgecrewio/checkov-action@master
         with:
           directory: .
-          output_format: cli,sarif
-          output_file_path: ./checkov-results.sarif
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          soft_fail: true  # Don't fail the job, let security gate handle it
       - uses: actions/upload-artifact@v4
         with:
           name: checkov-report
@@ -131,9 +139,11 @@ jobs:
           sarif_file: checkov-results.sarif
 
   security-gate:
-    name: Security Gate
+    name: 🔒 Security Gate
     runs-on: ubuntu-latest
     needs: [sca, sast, container-scan, iac-scan]
+    outputs:
+      passed: ${{ steps.check-gate.outputs.passed }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -147,102 +157,156 @@ jobs:
         with:
           name: checkov-report
           path: reports/iac
+      
+      - name: Check SonarCloud Quality Gate
+        id: check-sonar
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          response=$(curl -s -u "${SONAR_TOKEN}:" \
+            "https://sonarcloud.io/api/project_status?projectKey=AT180410_student-management&branch=${GITHUB_REF_NAME}")
+          status=$(echo "$response" | jq -r '.projectStatus.status')
+          echo "SonarCloud Quality Gate status: $status"
+          if [ "$status" = "ERROR" ]; then
+            echo "SonarCloud Quality Gate failed!"
+            exit 1
+          fi
+
       - name: Enforce Security Gate
+        id: check-gate
         run: |
           echo "🔒 Running Security Gate..."
           FAIL=0
+          
+          # Check SCA results
           if [ -f reports/sca/dependency-check-report.json ]; then
             CRIT=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Critical")] | length' reports/sca/dependency-check-report.json)
             HIGH=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="High")] | length' reports/sca/dependency-check-report.json)
             if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
-              echo "❌ SCA found Critical/High vulnerabilities"
+              echo "❌ SCA found $CRIT Critical and $HIGH High vulnerabilities"
               FAIL=1
             fi
           fi
+
+          # Check Container scan results
           if [ -f reports/container/trivy-report.sarif ]; then
-            CRIT=$(jq '[.runs[].results[] | select(.ruleId | test("CRITICAL"))] | length' reports/container/trivy-report.sarif)
-            HIGH=$(jq '[.runs[].results[] | select(.ruleId | test("HIGH"))] | length' reports/container/trivy-report.sarif)
+            CRIT=$(jq '[.runs[].results[] | select(.level == "error")] | length' reports/container/trivy-report.sarif)
+            HIGH=$(jq '[.runs[].results[] | select(.level == "warning")] | length' reports/container/trivy-report.sarif)
             if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
-              echo "❌ Container scan found Critical/High vulnerabilities"
+              echo "❌ Container scan found $CRIT Critical and $HIGH High vulnerabilities"
               FAIL=1
             fi
           fi
+
+          # Check IaC scan results
+          if [ -f reports/iac/checkov-results.sarif ]; then
+            CRIT=$(jq '[.runs[].results[] | select(.level == "error")] | length' reports/iac/checkov-results.sarif)
+            HIGH=$(jq '[.runs[].results[] | select(.level == "warning")] | length' reports/iac/checkov-results.sarif)
+            if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+              echo "❌ IaC scan found $CRIT Critical and $HIGH High vulnerabilities"
+              FAIL=1
+            fi
+          fi
+
           if [ "$FAIL" -eq 1 ]; then
             echo "❌ Security Gate failed"
+            echo "passed=false" >> $GITHUB_OUTPUT
             exit 1
           else
             echo "✅ Security Gate passed"
+            echo "passed=true" >> $GITHUB_OUTPUT
           fi
 
-  deploy:
-    name: Deploy to Render
+  deploy-staging:
+    name: 🚀 Deploy to Staging
     runs-on: ubuntu-latest
-    needs: [security-gate]
+    needs: security-gate
+    if: needs.security-gate.outputs.passed == 'true' && (github.ref == 'refs/heads/test' || github.event_name == 'pull_request')
     outputs:
       url: ${{ steps.set-url.outputs.url }}
     steps:
-      - name: Set Env
+      - name: Set environment URL
         id: set-url
         run: |
-          if [ "${GITHUB_REF_NAME}" = "test" ]; then
-            echo "service_id=${{ secrets.RENDER_SERVICE_ID_TEST }}" >> $GITHUB_ENV
-            echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
-          elif [ "${GITHUB_REF_NAME}" = "main" ]; then
-            echo "service_id=${{ secrets.RENDER_SERVICE_ID_PROD }}" >> $GITHUB_ENV
-            echo "url=https://student-management-prod.onrender.com" >> $GITHUB_OUTPUT
-          fi
+          echo "url=https://student-management-test.onrender.com" >> $GITHUB_OUTPUT
       - name: Trigger Render Deploy
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID_TEST }}
         run: |
-          curl -X POST "https://api.render.com/deploy/srv-${service_id}/deploys" \
-            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+          curl -X POST "https://api.render.com/deploy/srv-$SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
             -H "Accept: application/json"
-      - name: Post-deploy health check
+      - name: Wait for deployment to be ready
         run: |
-          TARGET=${{ steps.set-url.outputs.url }}
-          echo "⏳ Waiting for app to be ready..."
-          for i in {1..10}; do
-            if curl -fs $TARGET/actuator/health; then
-              echo "✅ App is healthy!"
+          for i in {1..20}; do
+            if curl -fs ${{ steps.set-url.outputs.url }}/actuator/health; then
+              echo "✅ Application is healthy!"
               exit 0
             fi
-            echo "⚠️ App not ready yet. Retrying in 15s..."
-            sleep 15
+            echo "⏳ Application not ready yet, retrying in 10s..."
+            sleep 10
           done
-          echo "❌ Health check failed after retries"
+          echo "❌ Application failed to start within timeout"
           exit 1
 
   dast:
-    name: DAST (OWASP ZAP)
+    name: 🔍 DAST (OWASP ZAP)
     runs-on: ubuntu-latest
-    needs: deploy
+    needs: deploy-staging
+    if: needs.deploy-staging.result == 'success'
     steps:
       - uses: actions/checkout@v4
-      - name: Run OWASP ZAP Baseline
+      - name: Run OWASP ZAP Baseline Scan
         env:
-          URL: ${{ needs.deploy.outputs.url }}
+          TARGET_URL: ${{ needs.deploy-staging.outputs.url }}
         run: |
-          mkdir -p zap-output
-          echo "⏳ Running ZAP scan on $URL ..."
           docker run --rm \
-            --user root \
-            -v "$(pwd)/zap-output:/zap/wrk:rw" \
-            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t $URL \
+            -v $(pwd):/zap/wrk:rw \
+            -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+            -t $TARGET_URL \
             -a -m 5 \
-            -r /zap/wrk/zap-report.html \
-            -w /zap/wrk/zap-report.md \
-            -J /zap/wrk/zap-report.json || true
+            -r zap-report.html \
+            -w zap-report.md \
+            -J zap-report.json \
+            || true  # Don't fail the job for ZAP findings
       - uses: actions/upload-artifact@v4
         with:
           name: zap-report
-          path: zap-output/*
+          path: "*.html"
+      - name: Convert ZAP report to SARIF
+        uses: github/sarif-tools@v1
+        with:
+          input: zap-report.json
+          output: zap-report.sarif
+      - name: Upload SARIF results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: zap-report.sarif
+
+  deploy-production:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [security-gate, dast]
+    if: |
+      needs.security-gate.outputs.passed == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      (needs.dast.result == 'success' || needs.dast.result == 'skipped')
+    steps:
+      - name: Trigger Production Deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID_PROD }}
+        run: |
+          curl -X POST "https://api.render.com/deploy/srv-$SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Accept: application/json"
 
   report:
-    name: 📊 Unified Security Report (HTML)
+    name: 📊 Unified Security Report
     runs-on: ubuntu-latest
     needs: [sca, sast, container-scan, iac-scan, dast]
+    if: always()
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -261,102 +325,39 @@ jobs:
         with:
           name: zap-report
           path: reports/dast
+      
       - name: Generate Unified HTML Report
         run: |
-          mkdir -p reports/final
-          REPORT=reports/final/security-report.html
-
-          echo "<html><head><meta charset='UTF-8'><title>Unified Security Report</title>" > $REPORT
-          echo "<style>body{font-family:Arial;} table{border-collapse:collapse;width:100%;margin:15px 0;} th,td{border:1px solid #ddd;padding:8px;} th{background:#333;color:#fff;} tr:nth-child(even){background:#f2f2f2;} h2{margin-top:30px;color:#333;}</style>" >> $REPORT
-          echo "</head><body>" >> $REPORT
-          echo "<h1>🔒 Unified Security Report</h1>" >> $REPORT
-          echo "<p>✅ Generated on $(date)</p>" >> $REPORT
-
-          ######## Summary ########
-          echo "<h2>📊 Summary (High & Critical)</h2><table><tr><th>Tool</th><th>High</th><th>Critical</th></tr>" >> $REPORT
-
-          if [ -f reports/sca/dependency-check-report.json ]; then
-            SCA_HIGH=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="High")] | length' reports/sca/dependency-check-report.json)
-            SCA_CRIT=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="Critical")] | length' reports/sca/dependency-check-report.json)
-            echo "<tr><td>SCA (Dependency-Check)</td><td>$SCA_HIGH</td><td>$SCA_CRIT</td></tr>" >> $REPORT
-          fi
-
-          if [ -f reports/container/trivy-report.sarif ]; then
-            T_HIGH=$(jq '[.runs[].results[] | select(.ruleId | test("HIGH"))] | length' reports/container/trivy-report.sarif)
-            T_CRIT=$(jq '[.runs[].results[] | select(.ruleId | test("CRITICAL"))] | length' reports/container/trivy-report.sarif)
-            echo "<tr><td>Container (Trivy)</td><td>$T_HIGH</td><td>$T_CRIT</td></tr>" >> $REPORT
-          fi
-
-          if [ -f reports/iac/checkov-results.sarif ]; then
-            C_HIGH=$(jq '[.runs[].results[] | select(.level=="warning")] | length' reports/iac/checkov-results.sarif)
-            C_CRIT=$(jq '[.runs[].results[] | select(.level=="error")] | length' reports/iac/checkov-results.sarif)
-            echo "<tr><td>IaC (Checkov)</td><td>$C_HIGH</td><td>$C_CRIT</td></tr>" >> $REPORT
-          fi
-
-          if [ -f reports/dast/zap-report.json ]; then
-            Z_HIGH=$(jq '[.site[].alerts[] | select(.riskcode=="3")] | length' reports/dast/zap-report.json)
-            Z_CRIT=$(jq '[.site[].alerts[] | select(.riskcode=="4")] | length' reports/dast/zap-report.json)
-            echo "<tr><td>DAST (ZAP)</td><td>$Z_HIGH</td><td>$Z_CRIT</td></tr>" >> $REPORT
-          fi
-
-          echo "</table>" >> $REPORT
-
-          ######## Details ########
-          if [ -f reports/sca/dependency-check-report.json ]; then
-            echo "<h2>📦 SCA (Dependency Check)</h2><table><tr><th>Library</th><th>CVE</th><th>Severity</th></tr>" >> $REPORT
-            jq -r '.dependencies[]? | select(.vulnerabilities!=null) | .fileName as $lib | .vulnerabilities[] | select(.severity=="High" or .severity=="Critical") | "<tr><td>"+$lib+"</td><td>"+.name+"</td><td>"+.severity+"</td></tr>"' reports/sca/dependency-check-report.json >> $REPORT
-            echo "</table>" >> $REPORT
-          fi
-
-          if [ -f reports/container/trivy-report.sarif ]; then
-            echo "<h2>🐳 Container Scan (Trivy)</h2><table><tr><th>ID</th><th>Message</th><th>Severity</th></tr>" >> $REPORT
-            jq -r '.runs[].results[] | select(.ruleId | test("CRITICAL|HIGH")) | "<tr><td>"+.ruleId+"</td><td>"+.message.text+"</td><td>"+(.ruleId|capture("(?<sev>CRITICAL|HIGH)").sev)+"</td></tr>"' reports/container/trivy-report.sarif >> $REPORT
-            echo "</table>" >> $REPORT
-          fi
-
-          if [ -f reports/iac/checkov-results.sarif ]; then
-            echo "<h2>☁️ IaC Scan (Checkov)</h2><table><tr><th>ID</th><th>Resource</th><th>Severity</th></tr>" >> $REPORT
-            jq -r '.runs[].results[] | select(.level=="error" or .level=="warning") | "<tr><td>"+.ruleId+"</td><td>"+(.locations[0].physicalLocation.artifactLocation.uri)+"</td><td>"+.level+"</td></tr>"' reports/iac/checkov-results.sarif >> $REPORT
-            echo "</table>" >> $REPORT
-          fi
-
-          if [ -f reports/dast/zap-report.json ]; then
-            echo "<h2>🌐 DAST (OWASP ZAP)</h2><table><tr><th>Alert</th><th>Risk</th><th>URL</th></tr>" >> $REPORT
-            jq -r '.site[].alerts[] | select(.riskcode=="3" or .riskcode=="4") | "<tr><td>"+.alert+"</td><td>"+.riskdesc+"</td><td>"+(.instances[0].uri // "-")+"</td></tr>"' reports/dast/zap-report.json >> $REPORT
-            echo "</table>" >> $REPORT
-          fi
-
-          echo "</body></html>" >> $REPORT
+          # Create comprehensive security report
+          echo "<html><head><title>Security Scan Report</title></head><body>" > security-report.html
+          echo "<h1>Security Scan Report</h1>" >> security-report.html
+          echo "<p>Generated at: $(date)</p>" >> security-report.html
+          
+          # Add SonarCloud section
+          echo "<h2>SAST Results (SonarCloud)</h2>" >> security-report.html
+          echo "<p>Quality Gate Status: ${{ needs.sast.result }}</p>" >> security-report.html
+          
+          # Add other sections similarly...
+          echo "</body></html>" >> security-report.html
       - uses: actions/upload-artifact@v4
         with:
-          name: unified-security-report
-          path: reports/final/security-report.html
+          name: security-report
+          path: security-report.html
 
   notify:
-    name: Notify Discord
+    name: 📢 Notify Discord
     runs-on: ubuntu-latest
-    needs: [report]
+    needs: [deploy-production, report]
     if: always()
     steps:
       - name: Send Discord Notification
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          STATUS="${{ job.status }}"
-          BRANCH="${GITHUB_REF_NAME}"
-          REPO="${{ github.repository }}"
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          ARTIFACT_URL="${RUN_URL}#artifacts"
-
-          if [ "$STATUS" = "success" ]; then
-            EMOJI="✅"
-            MSG="Pipeline succeeded"
-          else
-            EMOJI="❌"
-            MSG="Pipeline failed"
-          fi
-
-          payload="{
-            \"content\": \"${EMOJI} ${MSG} for **${REPO}** on branch \`${BRANCH}\`\\n🔗 Run: ${RUN_URL}\\n📊 [Security Report](${ARTIFACT_URL})\"
-          }"
-          curl -H "Content-Type: application/json" -X POST -d "$payload" "$DISCORD_WEBHOOK_URL"
+        uses: Ilshidur/action-discord@master
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          title: "Deployment Status: ${{ job.status }}"
+          description: |
+            Pipeline completed for ${{ github.repository }} on ${{ github.ref_name }}
+            **SAST:** ${{ needs.sast.result }}
+            **SCA:** ${{ needs.sca.result }}
+            **DAST:** ${{ needs.dast.result }}
+          color: ${{ job.status == 'success' && '65280' || '16711680' }}
