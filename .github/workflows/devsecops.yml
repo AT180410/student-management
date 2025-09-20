@@ -167,16 +167,18 @@ jobs:
           echo "🔒 Analyzing Security Reports..."
           FAIL=0
 
-          # Container scan: chỉ CRITICAL thật sự
-          if [ -f reports/container/trivy-report.sarif ]; then
-            CRIT_COUNT=$(jq '[.runs[0].results[]? | select((.properties.severity? // "") == "CRITICAL" or (.level=="error"))] | length' reports/container/trivy-report.sarif)
-            HIGH_COUNT=$(jq '[.runs[0].results[]? | select((.properties.severity? // "") == "HIGH" or (.level=="warning"))] | length' reports/container/trivy-report.sarif)
-            if [ "$CRIT_COUNT" -gt 0 ]; then
-              echo "❌ Container scan found $CRIT_COUNT CRITICAL vulnerabilities"
-              FAIL=1
-            fi
-            echo "ℹ️ Container scan HIGH vulnerabilities: $HIGH_COUNT"
-          fi
+           if [ -f reports/container/trivy-report.sarif ]; then
+                echo "🐳 Analyzing Container Scan results..."
+                CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.properties.overrideSeverity == "CRITICAL") | .ruleId' reports/container/trivy-report.sarif | wc -l)
+                if [ "$CRITICAL_COUNT" -eq 0 ]; then
+                  CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.message.text | test("CRITICAL")) | .ruleId' reports/container/trivy-report.sarif | wc -l)
+                fi
+                if [ "$CRITICAL_COUNT" -gt 0 ]; then
+                  echo "❌ Container scan found $CRITICAL_COUNT CRITICAL vulnerabilities"
+                  jq -r '.runs[0].results[]? | select(.properties.overrideSeverity == "CRITICAL" or (.message.text | test("CRITICAL"))) | "\(.ruleId) - CRITICAL - \(.message.text)"' reports/container/trivy-report.sarif | head -5
+                  FAIL=1
+                fi
+              fi
 
           # SCA scan
           if [ -f reports/sca/dependency-check-report.json ]; then
