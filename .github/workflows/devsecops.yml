@@ -253,32 +253,26 @@ jobs:
     name: 🛡️ DAST (OWASP ZAP)
     runs-on: ubuntu-latest
     needs: deploy-staging
-    if: needs.deploy-staging.result == 'success'
+    env:
+      TARGET: "https://student-management-test-vrfb.onrender.com"
     steps:
       - uses: actions/checkout@v4
-      - name: Run OWASP ZAP Baseline
-        env:
-          TARGET: "https://student-management-test-vrfb.onrender.com"
+  
+      - name: Run ZAP Baseline
         run: |
           mkdir -p zap-output
-          echo "⏳ Running ZAP scan on $TARGET ..."
           docker run --rm \
-            --user root \
             -v "$(pwd)/zap-output:/zap/wrk:rw" \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
             -t $TARGET \
             -a -m 5 \
+            -J /zap/wrk/zap-report.json \
             -r /zap/wrk/zap-report.html \
-            -w /zap/wrk/zap-report.md \
-            -J /zap/wrk/zap-report.json || true
-      - uses: actions/upload-artifact@v4
-        with:
-          name: zap-report
-          path: zap-output/*
-      - name: Convert ZAP report to SARIF
+            -w /zap/wrk/zap-report.md || true
+  
+      - name: Convert JSON → SARIF
         run: |
           if [ -f zap-output/zap-report.json ]; then
-            echo "🔄 Converting ZAP JSON to SARIF..."
             jq -n --argjson zap "$(cat zap-output/zap-report.json)" '
             {
               "version": "2.1.0",
@@ -308,14 +302,20 @@ jobs:
                   })
                 }
               ]
-            }' > zap-report.sarif
+            }' > zap-output/zap-report.sarif
           else
-            echo "⚠️ No zap-report.json found, skipping SARIF conversion"
+            echo '{"version":"2.1.0","runs":[]}' > zap-output/zap-report.sarif
           fi
+  
       - name: Upload SARIF results
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: zap-report.sarif
+          sarif_file: zap-output/zap-report.sarif
+  
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: zap-output/*
 
   deploy-production:
     name: 🚀 Deploy to Production
