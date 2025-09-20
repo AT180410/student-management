@@ -261,14 +261,13 @@ jobs:
           mkdir -p zap-output
           docker run --network="host" \
             -v ${{ github.workspace }}/zap-output:/zap/wrk/:rw \
-            owasp/zap2docker-stable zap-baseline.py \
+            zaproxy/zap-stable zap-baseline.py \
             -t ${{ secrets.TARGET_URL }} \
             -g gen.conf \
             -x zap-output/zap-report.xml \
             -J zap-output/zap-report.json \
             -r zap-output/zap-report.html
   
-      # Convert JSON -> SARIF
       - name: Convert ZAP JSON to SARIF
         run: |
           npm install -g @microsoft/sarif-multitool
