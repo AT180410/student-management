@@ -276,10 +276,42 @@ jobs:
           name: zap-report
           path: zap-output/*
       - name: Convert ZAP report to SARIF
-        uses: github/sarif-tools@v1
-        with:
-          input: zap-output/zap-report.json
-          output: zap-report.sarif
+        run: |
+          if [ -f zap-output/zap-report.json ]; then
+            echo "🔄 Converting ZAP JSON to SARIF..."
+            jq -n --argjson zap "$(cat zap-output/zap-report.json)" '
+            {
+              "version": "2.1.0",
+              "runs": [
+                {
+                  "tool": {
+                    "driver": {
+                      "name": "OWASP ZAP",
+                      "informationUri": "https://www.zaproxy.org",
+                      "rules": ($zap.site[].alerts[]? | {
+                        id: .pluginid,
+                        name: .alert,
+                        fullDescription: { text: .desc },
+                        helpUri: .reference
+                      }) | unique
+                    }
+                  },
+                  "results": ($zap.site[].alerts[]? | {
+                    ruleId: .pluginid,
+                    message: { text: .alert },
+                    locations: [
+                      { physicalLocation: { artifactLocation: { uri: (.instances[0].uri // "") } } }
+                    ],
+                    level: (if .riskcode == "4" then "error"
+                            elif .riskcode == "3" then "warning"
+                            else "note" end)
+                  })
+                }
+              ]
+            }' > zap-report.sarif
+          else
+            echo "⚠️ No zap-report.json found, skipping SARIF conversion"
+          fi
       - name: Upload SARIF results
         uses: github/codeql-action/upload-sarif@v3
         with:
