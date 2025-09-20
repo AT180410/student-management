@@ -292,8 +292,17 @@ jobs:
       - name: Convert ZAP JSON to SARIF
         run: |
           npm install -g @microsoft/sarif-multitool
-          sarif-multitool convert --tool OWASPZAP zap-output/zap-report.json --output zap-output/zap-report.sarif --normalize-for-ghas || true
-
+          if [ -f zap-output/zap-report.json ]; then
+            echo "Found zap-report.json ✅"
+            sarif-multitool convert \
+              --tool ContrastSecurity \
+              zap-output/zap-report.json \
+              --output zap-output/zap-report.sarif \
+              --normalize-for-ghas || true
+          else
+            echo "⚠️ zap-report.json not found, skipping SARIF conversion"
+          fi
+          
       - name: Upload SARIF results
         uses: github/codeql-action/upload-sarif@v3
         with:
