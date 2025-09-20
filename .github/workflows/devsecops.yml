@@ -170,6 +170,7 @@ jobs:
            if [ -f reports/container/trivy-report.sarif ]; then
                 echo "🐳 Analyzing Container Scan results..."
                 CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.properties.overrideSeverity == "CRITICAL") | .ruleId' reports/container/trivy-report.sarif | wc -l)
+                HIGH_COUNT=$(jq -r '.runs[0].results[]? | select(.properties.overrideSeverity == "HIGH") | .ruleId' reports/container/trivy-report.sarif | wc -l)
                 if [ "$CRITICAL_COUNT" -eq 0 ]; then
                   CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.message.text | test("CRITICAL")) | .ruleId' reports/container/trivy-report.sarif | wc -l)
                 fi
@@ -178,6 +179,7 @@ jobs:
                   jq -r '.runs[0].results[]? | select(.properties.overrideSeverity == "CRITICAL" or (.message.text | test("CRITICAL"))) | "\(.ruleId) - CRITICAL - \(.message.text)"' reports/container/trivy-report.sarif | head -5
                   FAIL=1
                 fi
+                echo "ℹ️ Container scan HIGH vulnerabilities: $HIGH_COUNT"
               fi
 
           # SCA scan
