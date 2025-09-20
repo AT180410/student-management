@@ -226,7 +226,7 @@ jobs:
       - name: Set environment URL
         id: set-url
         run: |
-          echo "url=https://student-management-test.onrender.com" >> $GITHUB_OUTPUT
+          echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
       - name: Trigger Render Deploy
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
