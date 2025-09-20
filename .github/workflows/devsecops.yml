@@ -137,67 +137,107 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: checkov-results.sarif
-
+  
   security-gate:
     name: 🔒 Security Gate
     runs-on: ubuntu-latest
-    needs: [sca, sast, container-scan, iac-scan]   # ❌ không cần dast
+    needs: [sca, sast, container-scan, iac-scan]
+    outputs:
+      passed: ${{ steps.check-gate.outputs.passed }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: dependency-check-report
           path: reports/sca
+          
       - uses: actions/download-artifact@v4
         with:
           name: trivy-report
           path: reports/container
+          
       - uses: actions/download-artifact@v4
         with:
           name: checkov-report
           path: reports/iac
-
-      - name: Enforce Security Gate
+  
+      - name: Check SonarCloud Quality Gate
+        id: check-sonar
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          echo "🔒 Running Security Gate..."
+          response=$(curl -s -u "${SONAR_TOKEN}:" \
+            "https://sonarcloud.io/api/project_status?projectKey=AT180410_student-management&branch=${GITHUB_REF_NAME}")
+          status=$(echo "$response" | jq -r '.projectStatus.status')
+          echo "SonarCloud Quality Gate status: $status"
+          if [ "$status" = "ERROR" ]; then
+            echo "SonarCloud Quality Gate failed!"
+            echo "passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+  
+      - name: Analyze Security Reports
+        id: check-gate
+        run: |
+          echo "🔒 Analyzing Security Reports..."
           FAIL=0
           
-          # 📦 SCA
+          # Phân tích SCA results - CHỈ khớp với CRITICAL viết hoa
           if [ -f reports/sca/dependency-check-report.json ]; then
-            CRIT=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="CRITICAL")] | length' reports/sca/dependency-check-report.json)
-            HIGH=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="HIGH")] | length' reports/sca/dependency-check-report.json)
-            if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
-              echo "❌ SCA: Found $CRIT CRITICAL and $HIGH HIGH"
+            echo "📦 Analyzing SCA results..."
+            CRITICAL_COUNT=$(jq -r '.dependencies[]?.vulnerabilities[]? | select(.severity == "CRITICAL") | .name' reports/sca/dependency-check-report.json | wc -l)
+            
+            if [ "$CRITICAL_COUNT" -gt 0 ]; then
+              echo "❌ SCA found $CRITICAL_COUNT CRITICAL vulnerabilities"
+              jq -r '.dependencies[]?.vulnerabilities[]? | select(.severity == "CRITICAL") | "\(.name) - \(.severity) - \(.description)"' reports/sca/dependency-check-report.json | head -5
               FAIL=1
             fi
           fi
-          
-          # 🐳 Trivy
+  
+          # Phân tích Container Scan results - CHỈ khớp với level "error"
           if [ -f reports/container/trivy-report.sarif ]; then
-            CRIT=$(jq '[.runs[0].results[]? | select(.level=="error")] | length' reports/container/trivy-report.sarif)
-            HIGH=$(jq '[.runs[0].results[]? | select(.level=="warning")] | length' reports/container/trivy-report.sarif)
-            if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
-              echo "❌ Trivy: Found $CRIT CRITICAL and $HIGH HIGH"
+            echo "🐳 Analyzing Container Scan results..."
+            CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.level == "error") | .ruleId' reports/container/trivy-report.sarif | wc -l)
+            
+            if [ "$CRITICAL_COUNT" -gt 0 ]; then
+              echo "❌ Container scan found $CRITICAL_COUNT CRITICAL vulnerabilities"
+              jq -r '.runs[0].results[]? | select(.level == "error") | "\(.ruleId) - \(.level) - \(.message.text)"' reports/container/trivy-report.sarif | head -5
               FAIL=1
             fi
           fi
-          
-          # ☁️ Checkov
+  
+          # Phân tích IaC Scan results - CHỈ khớp với level "error"
           if [ -f reports/iac/checkov-results.sarif ]; then
-            CRIT=$(jq '[.runs[0].results[]? | select(.level=="error")] | length' reports/iac/checkov-results.sarif)
-            HIGH=$(jq '[.runs[0].results[]? | select(.level=="warning")] | length' reports/iac/checkov-results.sarif)
-            if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
-              echo "❌ Checkov: Found $CRIT CRITICAL and $HIGH HIGH"
+            echo "☁️ Analyzing IaC Scan results..."
+            CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.level == "error") | .ruleId' reports/iac/checkov-results.sarif | wc -l)
+            
+            if [ "$CRITICAL_COUNT" -gt 0 ]; then
+              echo "❌ IaC scan found $CRITICAL_COUNT CRITICAL vulnerabilities"
+              jq -r '.runs[0].results[]? | select(.level == "error") | "\(.ruleId) - \(.level) - \(.message.text)"' reports/iac/checkov-results.sarif | head -5
               FAIL=1
             fi
           fi
-          
+  
+          # Kiểm tra DAST results - CHỈ khớp với riskcode "4" (Critical)
+          if [ -f reports/dast/zap-report.json ]; then
+            echo "🌐 Analyzing DAST results..."
+            CRITICAL_COUNT=$(jq -r '.site[]?.alerts[]? | select(.riskcode == "4") | .alert' reports/dast/zap-report.json | wc -l)
+            
+            if [ "$CRITICAL_COUNT" -gt 0 ]; then
+              echo "❌ DAST found $CRITICAL_COUNT CRITICAL vulnerabilities"
+              jq -r '.site[]?.alerts[]? | select(.riskcode == "4") | "\(.alert) - Risk: \(.riskcode) - \(.desc)"' reports/dast/zap-report.json | head -5
+              FAIL=1
+            fi
+          fi
+  
           if [ "$FAIL" -eq 1 ]; then
-            echo "❌ Security Gate failed (CRITICAL/HIGH found)"
+            echo "❌ Security Gate failed - Found CRITICAL vulnerabilities"
+            echo "passed=false" >> $GITHUB_OUTPUT
             exit 1
           else
-            echo "✅ Security Gate passed (no CRITICAL/HIGH)"
+            echo "✅ Security Gate passed - No CRITICAL vulnerabilities found"
+            echo "passed=true" >> $GITHUB_OUTPUT
           fi
-
+          
   deploy-staging:
     name: 🚀 Deploy to Staging
     runs-on: ubuntu-latest
