@@ -250,92 +250,42 @@ jobs:
           exit 1
 
   dast:
-    name: 🛡️ DAST (OWASP ZAP)
-    runs-on: ubuntu-latest
-    needs: deploy-staging
-    if: needs.deploy-staging.result == 'success'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Create ZAP configuration
-        run: |
-          mkdir -p zap-output
-          cat > zap-output/zap.yaml <<EOF
-env:
-  contexts:
-    - excludePaths: []
-      name: baseline
-      urls:
-        - ${{ needs.deploy-staging.outputs.url }}
-  parameters:
-    failOnError: false
-  jobs:
-  - type: passiveScan-config
-    parameters:
-      enableTags: false
-      maxAlertsPerRule: 10
-
-  - type: spider
-    parameters:
-      maxDuration: 5
-      url: ${{ needs.deploy-staging.outputs.url }}
-
-  - type: passiveScan-wait
-    parameters:
-      maxDuration: 0
-
-  - type: outputSummary
-    parameters:
-      format: Long
-      summaryFile: /zap/wrk/zap_out.json
-    rules: []
-
-  - type: report
-    parameters:
-      reportDescription: ''
-      reportDir: /zap/wrk/
-      reportFile: /zap/wrk/zap-report.html
-      reportTitle: ZAP Scanning Report
-      template: traditional-html
-
-  - type: report
-    parameters:
-      reportDescription: ''
-      reportDir: /zap/wrk/
-      reportFile: /zap/wrk/zap-report.json
-      reportTitle: ZAP Scanning Report
-      template: traditional-json
-EOF
-
-      - name: Run ZAP Baseline Scan
-        run: |
-          docker run --rm \
-            --user root \
-            -v "$(pwd)/zap-output:/zap/wrk:rw" \
-            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t ${{ needs.deploy-staging.outputs.url }} \
-            -c /zap/wrk/zap.yaml \
-            -r /zap/wrk/zap-report.html \
-            -J /zap/wrk/zap-report.json \
-            || true
-
-      - name: Upload ZAP artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: zap-report
-          path: zap-output/*
-
-      - name: Convert JSON to SARIF
-        run: |
-          npm install -g @microsoft/sarif-multitool
-          sarif-multitool convert -t ZAP -i zap-output/zap-report.json -o zap-output/zap-report.sarif
-        continue-on-error: true
-
-      - name: Upload SARIF results
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: zap-output/zap-report.sarif
-        continue-on-error: true
+      name: 🛡️ DAST (OWASP ZAP)
+      runs-on: ubuntu-latest
+      needs: deploy-staging
+      if: needs.deploy-staging.result == 'success'
+      steps:
+        - uses: actions/checkout@v4
+    
+        - name: Run ZAP Baseline Scan
+          run: |
+            mkdir -p zap-output
+            docker run --rm \
+              -v "$(pwd)/zap-output:/zap/wrk" \
+              ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+              -t ${{ needs.deploy-staging.outputs.url }} \
+              -r /zap/wrk/zap-report.html \
+              -J /zap/wrk/zap-report.json \
+              -w /zap/wrk/zap-report.md \
+              -z "-config api.disablekey=true" || true
+    
+        - name: Upload ZAP Artifacts
+          uses: actions/upload-artifact@v4
+          with:
+            name: zap-report
+            path: zap-output/*
+    
+        - name: Convert ZAP JSON to SARIF
+          run: |
+            npm install -g @microsoft/sarif-multitool
+            sarif-multitool convert -t ZAP -i zap-output/zap-report.json -o zap-output/zap-report.sarif
+          continue-on-error: true
+    
+        - name: Upload SARIF to GitHub Security tab
+          uses: github/codeql-action/upload-sarif@v3
+          with:
+            sarif_file: zap-output/zap-report.sarif
+          continue-on-error: true
 
   deploy-production:
     name: 🚀 Deploy to Production
