@@ -258,7 +258,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run OWASP ZAP Baseline
         env:
-          TARGET=${{ needs.deploy-staging.outputs.url }}
+          TARGET: "https://student-management-test-vrfb.onrender.com"
         run: |
           mkdir -p zap-output
           echo "⏳ Running ZAP scan on $TARGET ..."
