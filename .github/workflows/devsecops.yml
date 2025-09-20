@@ -256,6 +256,7 @@ jobs:
     if: needs.deploy-staging.result == 'success'
     steps:
       - uses: actions/checkout@v4
+
       - name: Run OWASP ZAP Baseline
         env:
           TARGET: ${{ needs.deploy-staging.outputs.url }}
@@ -265,17 +266,39 @@ jobs:
           docker run --rm \
             --user root \
             -v "$(pwd)/zap-output:/zap/wrk:rw" \
-            zaproxy/zap-stable zap-baseline.py \
+            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
             -t $TARGET \
             -a -m 5 \
             -r /zap/wrk/zap-report.html \
             -w /zap/wrk/zap-report.md \
             -J /zap/wrk/zap-report.json || true
+
+      - name: Debug ZAP Output Folder
+        run: |
+          echo "===== zap-output content ====="
+          ls -lah zap-output || true
+          echo "===== Preview zap-report.json ====="
+          if [ -f zap-output/zap-report.json ]; then
+            head -50 zap-output/zap-report.json
+          else
+            echo "⚠️ zap-report.json not found"
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: zap-report
           path: zap-output/*
 
+      - name: Convert ZAP JSON to SARIF
+        run: |
+          npm install -g @microsoft/sarif-multitool
+          sarif-multitool convert --tool OWASPZAP zap-output/zap-report.json --output zap-output/zap-report.sarif --normalize-for-ghas || true
+
+      - name: Upload SARIF results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: zap-output/zap-report.sarif
+          
   deploy-production:
     name: 🚀 Deploy to Production
     runs-on: ubuntu-latest
