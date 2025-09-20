@@ -273,40 +273,45 @@ jobs:
       - name: Convert JSON → SARIF
         run: |
           if [ -f zap-output/zap-report.json ]; then
-            jq -n --argjson zap "$(cat zap-output/zap-report.json)" '
-            {
-              "version": "2.1.0",
-              "runs": [
+            jq '{
+              version: "2.1.0",
+              runs: [
                 {
-                  "tool": {
-                    "driver": {
-                      "name": "OWASP ZAP",
-                      "informationUri": "https://www.zaproxy.org",
-                      "rules": ($zap.site[].alerts[]? | {
+                  tool: {
+                    driver: {
+                      name: "OWASP ZAP",
+                      informationUri: "https://www.zaproxy.org",
+                      rules: (.site[]?.alerts[]? | {
                         id: .pluginid,
                         name: .alert,
+                        shortDescription: { text: .alert },
                         fullDescription: { text: .desc },
-                        helpUri: .reference
+                        helpUri: (.reference // "")
                       }) | unique
                     }
                   },
-                  "results": ($zap.site[].alerts[]? | {
+                  results: [.site[]?.alerts[]? | {
                     ruleId: .pluginid,
                     message: { text: .alert },
                     locations: [
-                      { physicalLocation: { artifactLocation: { uri: (.instances[0].uri // "") } } }
+                      {
+                        physicalLocation: {
+                          artifactLocation: {
+                            uri: (.instances[0].uri // "N/A")
+                          }
+                        }
+                      }
                     ],
                     level: (if .riskcode == "4" then "error"
                             elif .riskcode == "3" then "warning"
                             else "note" end)
-                  })
+                  }]
                 }
               ]
-            }' > zap-output/zap-report.sarif
+            }' zap-output/zap-report.json > zap-output/zap-report.sarif
           else
             echo '{"version":"2.1.0","runs":[]}' > zap-output/zap-report.sarif
           fi
-  
       - name: Upload SARIF results
         uses: github/codeql-action/upload-sarif@v3
         with:
