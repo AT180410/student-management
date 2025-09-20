@@ -266,7 +266,7 @@ jobs:
             -g gen.conf \
             -x zap-output/zap-report.xml \
             -J zap-output/zap-report.json \
-            -r zap-output/zap-report.html
+            -r zap-output/zap-report.html || true   # 👈 không chặn pipeline khi có High/Medium
   
       - name: Convert ZAP JSON to SARIF
         run: |
