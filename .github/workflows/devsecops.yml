@@ -248,62 +248,48 @@ jobs:
           done
           echo "❌ Application failed to start within timeout"
           exit 1
-
+  
   dast:
-    name: 🛡️ DAST (OWASP ZAP)
+    name: DAST (OWASP ZAP)
     runs-on: ubuntu-latest
     needs: deploy-staging
-    if: needs.deploy-staging.result == 'success'
     steps:
       - uses: actions/checkout@v4
-
-      - name: Run OWASP ZAP Baseline
-        env:
-          TARGET: ${{ needs.deploy-staging.outputs.url }}
+  
+      - name: Prepare zap-output directory
+        run: mkdir -p zap-output
+  
+      - name: Run ZAP Scan
         run: |
-          mkdir -p zap-output
-          echo "⏳ Running ZAP scan on $TARGET ..."
           docker run --rm \
-            --user root \
-            -v "$(pwd)/zap-output:/zap/wrk:rw" \
-            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t $TARGET \
-            -a -m 5 \
-            -r /zap/wrk/zap-report.html \
-            -w /zap/wrk/zap-report.md \
-            -J /zap/wrk/zap-report.json || true
-
-      - name: Debug ZAP Output Folder
-        run: |
-          echo "===== zap-output content ====="
-          ls -lah zap-output || true
-          echo "===== Preview zap-report.json ====="
-          if [ -f zap-output/zap-report.json ]; then
-            head -50 zap-output/zap-report.json
-          else
-            echo "⚠️ zap-report.json not found"
-          fi
-
-      - uses: actions/upload-artifact@v4
+            -v ${{ github.workspace }}/zap-output:/zap/wrk/:rw \
+            owasp/zap2docker-stable:latest \
+            zap.sh -cmd -autorun /zap/wrk/zap.yaml | tee zap-output/zap.log
+  
+      - name: List zap-output files
+        run: ls -lah zap-output
+  
+      - name: Upload ZAP artifacts
+        uses: actions/upload-artifact@v4
         with:
           name: zap-report
-          path: zap-output/*
-
+          path: zap-output/
+  
+      - name: Install SARIF Multitool
+        run: npm install -g @microsoft/sarif-multitool
+  
       - name: Convert ZAP JSON to SARIF
         run: |
-          npm install -g @microsoft/sarif-multitool
           if [ -f zap-output/zap-report.json ]; then
-            echo "Found zap-report.json ✅"
-            sarif-multitool convert \
+            npx @microsoft/sarif-multitool convert zap-output/zap-report.json \
               --tool ContrastSecurity \
-              zap-output/zap-report.json \
               --output zap-output/zap-report.sarif \
-              --normalize-for-ghas || true
+              --normalize-for-ghas
           else
             echo "⚠️ zap-report.json not found, skipping SARIF conversion"
           fi
-          
-      - name: Upload SARIF results
+  
+      - name: Upload SARIF to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: zap-output/zap-report.sarif
