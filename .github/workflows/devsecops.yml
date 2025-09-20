@@ -184,13 +184,13 @@ jobs:
           # 📦 SCA results (OWASP Dependency-Check)
           if [ -f reports/sca/dependency-check-report.json ]; then
             echo "📦 Analyzing SCA results..."
-            CRITICAL_COUNT=$(jq '[.dependencies[]?.vulnerabilities[]? | select((.severity|ascii_upcase) == "CRITICAL")] | length' reports/sca/dependency-check-report.json)
-            HIGH_COUNT=$(jq '[.dependencies[]?.vulnerabilities[]? | select((.severity|ascii_upcase) == "HIGH")] | length' reports/sca/dependency-check-report.json)
+            CRITICAL_COUNT=$(jq '[.dependencies[]?.vulnerabilities[]? | select(.severity == "CRITICAL")] | length' reports/sca/dependency-check-report.json)
+            HIGH_COUNT=$(jq '[.dependencies[]?.vulnerabilities[]? | select(.severity == "HIGH")] | length' reports/sca/dependency-check-report.json)
             
             if [ "$CRITICAL_COUNT" -gt 0 ] || [ "$HIGH_COUNT" -gt 0 ]; then
               echo "❌ SCA found $CRITICAL_COUNT Critical and $HIGH_COUNT High vulnerabilities"
               jq -r '.dependencies[]?.vulnerabilities[]? 
-                | select((.severity|ascii_upcase) == "CRITICAL" or (.severity|ascii_upcase) == "HIGH") 
+                | select(.severity == "CRITICAL" or .severity == "HIGH") 
                 | "\(.name // "N/A") - \(.severity)"' reports/sca/dependency-check-report.json | head -5
               FAIL=1
             fi
