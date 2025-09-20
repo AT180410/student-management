@@ -257,10 +257,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
   
-      - name: Prepare output folder
-        run: |
-          rm -rf zap-output
-          mkdir -p zap-output
+      - name: Create output folder
+        run: mkdir -p zap-output
   
       - name: Run ZAP Baseline Scan
         run: |
@@ -270,6 +268,8 @@ jobs:
             -t ${{ needs.deploy-staging.outputs.url }} \
             -r /zap/wrk/zap-report.html \
             -J /zap/wrk/zap-report.json \
+            --exitcodefail 0 \
+            --hook /zap/wrk/zap-report.html \
             || true
   
       - name: Upload ZAP artifacts
@@ -278,22 +278,18 @@ jobs:
           name: zap-report
           path: zap-output/*
   
-      - name: Convert JSON to SARIF (optional)
+      - name: Convert JSON to SARIF
         run: |
           npm install -g @microsoft/sarif-multitool
-          if [ -f zap-output/zap-report.json ]; then
-            sarif-multitool convert -t ZAP -i zap-output/zap-report.json -o zap-output/zap-report.sarif
-          else
-            echo "⚠️ zap-report.json not found, skipping SARIF conversion"
-          fi
+          sarif-multitool convert -t ZAP -i zap-output/zap-report.json -o zap-output/zap-report.sarif
         continue-on-error: true
   
-      - name: Upload SARIF results (optional)
+      - name: Upload SARIF results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: zap-output/zap-report.sarif
         continue-on-error: true
-      
+        
   deploy-production:
     name: 🚀 Deploy to Production
     runs-on: ubuntu-latest
