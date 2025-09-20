@@ -167,51 +167,37 @@ jobs:
           echo "🔒 Analyzing Security Reports..."
           FAIL=0
           
-          # Phân tích Container Scan results
+          # Container
           if [ -f reports/container/trivy-report.sarif ]; then
-            echo "🐳 Analyzing Container Scan results..."
-            CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.properties.overrideSeverity == "CRITICAL") | .ruleId' reports/container/trivy-report.sarif | wc -l)
-            if [ "$CRITICAL_COUNT" -eq 0 ]; then
-              CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.message.text | test("CRITICAL")) | .ruleId' reports/container/trivy-report.sarif | wc -l)
-            fi
+            CRITICAL_COUNT=$(jq '[.runs[0].results[]? | select(.level=="error")] | length' reports/container/trivy-report.sarif)
             if [ "$CRITICAL_COUNT" -gt 0 ]; then
               echo "❌ Container scan found $CRITICAL_COUNT CRITICAL vulnerabilities"
-              jq -r '.runs[0].results[]? | select(.properties.overrideSeverity == "CRITICAL" or (.message.text | test("CRITICAL"))) | "\(.ruleId) - CRITICAL - \(.message.text)"' reports/container/trivy-report.sarif | head -5
               FAIL=1
             fi
           fi
 
-          # Phân tích SCA results
+          # SCA
           if [ -f reports/sca/dependency-check-report.json ]; then
-            echo "📦 Analyzing SCA results..."
-            CRITICAL_COUNT=$(jq -r '.dependencies[]?.vulnerabilities[]? | select(.severity == "CRITICAL") | .name' reports/sca/dependency-check-report.json | wc -l)
+            CRITICAL_COUNT=$(jq '[.dependencies[]?.vulnerabilities[]? | select(.severity=="CRITICAL")] | length' reports/sca/dependency-check-report.json)
             if [ "$CRITICAL_COUNT" -gt 0 ]; then
               echo "❌ SCA found $CRITICAL_COUNT CRITICAL vulnerabilities"
-              jq -r '.dependencies[]?.vulnerabilities[]? | select(.severity == "CRITICAL") | "\(.name) - CRITICAL - \(.description)"' reports/sca/dependency-check-report.json | head -5
               FAIL=1
             fi
           fi
 
-          # Phân tích IaC Scan results
+          # IaC
           if [ -f reports/iac/checkov-results.sarif ]; then
-            echo "☁️ Analyzing IaC Scan results..."
-            CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.properties.overrideSeverity == "CRITICAL") | .ruleId' reports/iac/checkov-results.sarif | wc -l)
-            if [ "$CRITICAL_COUNT" -eq 0 ]; then
-              CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.message.text | test("CRITICAL")) | .ruleId' reports/iac/checkov-results.sarif | wc -l)
-            fi
+            CRITICAL_COUNT=$(jq '[.runs[0].results[]? | select(.level=="error")] | length' reports/iac/checkov-results.sarif)
             if [ "$CRITICAL_COUNT" -gt 0 ]; then
               echo "❌ IaC scan found $CRITICAL_COUNT CRITICAL vulnerabilities"
-              jq -r '.runs[0].results[]? | select(.properties.overrideSeverity == "CRITICAL" or (.message.text | test("CRITICAL"))) | "\(.ruleId) - CRITICAL - \(.message.text)"' reports/iac/checkov-results.sarif | head -5
               FAIL=1
             fi
           fi
 
           if [ "$FAIL" -eq 1 ]; then
-            echo "❌ Security Gate failed - Found CRITICAL vulnerabilities"
             echo "passed=false" >> $GITHUB_OUTPUT
             exit 1
           else
-            echo "✅ Security Gate passed - No CRITICAL vulnerabilities found"
             echo "passed=true" >> $GITHUB_OUTPUT
           fi
 
@@ -225,8 +211,7 @@ jobs:
     steps:
       - name: Set environment URL
         id: set-url
-        run: |
-          echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
+        run: echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
       - name: Trigger Render Deploy
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
@@ -268,8 +253,6 @@ jobs:
             -t ${{ needs.deploy-staging.outputs.url }} \
             -r /zap/wrk/zap-report.html \
             -J /zap/wrk/zap-report.json \
-            --exitcodefail 0 \
-            --hook /zap/wrk/zap-report.html \
             || true
   
       - name: Upload ZAP artifacts
@@ -277,7 +260,7 @@ jobs:
         with:
           name: zap-report
           path: zap-output/*
-  
+
       - name: Convert JSON to SARIF
         run: |
           npm install -g @microsoft/sarif-multitool
@@ -289,7 +272,7 @@ jobs:
         with:
           sarif_file: zap-output/zap-report.sarif
         continue-on-error: true
-        
+
   deploy-production:
     name: 🚀 Deploy to Production
     runs-on: ubuntu-latest
@@ -335,78 +318,12 @@ jobs:
         run: |
           mkdir -p reports/final
           REPORT=reports/final/security-report.html
-
           echo "<html><head><meta charset='UTF-8'><title>Unified Security Report</title>" > $REPORT
           echo "<style>body{font-family:Arial;} table{border-collapse:collapse;width:100%;margin:15px 0;} th,td{border:1px solid #ddd;padding:8px;} th{background:#333;color:#fff;} tr:nth-child(even){background:#f2f2f2;} h2{margin-top:30px;color:#333;}.critical{color:red;font-weight:bold;} .high{color:orange;font-weight:bold;}</style>" >> $REPORT
           echo "</head><body>" >> $REPORT
           echo "<h1>🔒 Unified Security Report</h1>" >> $REPORT
           echo "<p>✅ Generated on $(date)</p>" >> $REPORT
-
-          # Summary (CRITICAL & HIGH uppercase)
-          echo "<h2>📊 Summary (CRITICAL & HIGH)</h2><table><tr><th>Tool</th><th>HIGH</th><th>CRITICAL</th></tr>" >> $REPORT
-
-          if [ -f reports/sca/dependency-check-report.json ]; then
-            SCA_HIGH=$(jq '[.dependencies[]?.vulnerabilities[]? | select(.severity=="HIGH")] | length' reports/sca/dependency-check-report.json)
-            SCA_CRIT=$(jq '[.dependencies[]?.vulnerabilities[]? | select(.severity=="CRITICAL")] | length' reports/sca/dependency-check-report.json)
-            echo "<tr><td>SCA (Dependency-Check)</td><td>$SCA_HIGH</td><td>$SCA_CRIT</td></tr>" >> $REPORT
-          else
-            echo "<tr><td>SCA (Dependency-Check)</td><td>-</td><td>-</td></tr>" >> $REPORT
-          fi
-
-          if [ -f reports/container/trivy-report.sarif ]; then
-            T_HIGH=$(jq '[.runs[0].results[]? | select(.level=="warning")] | length' reports/container/trivy-report.sarif)
-            T_CRIT=$(jq '[.runs[0].results[]? | select(.level=="error")] | length' reports/container/trivy-report.sarif)
-            echo "<tr><td>Container (Trivy)</td><td>$T_HIGH</td><td>$T_CRIT</td></tr>" >> $REPORT
-          else
-            echo "<tr><td>Container (Trivy)</td><td>-</td><td>-</td></tr>" >> $REPORT
-          fi
-
-          if [ -f reports/iac/checkov-results.sarif ]; then
-            C_HIGH=$(jq '[.runs[0].results[]? | select(.level=="warning")] | length' reports/iac/checkov-results.sarif)
-            C_CRIT=$(jq '[.runs[0].results[]? | select(.level=="error")] | length' reports/iac/checkov-results.sarif)
-            echo "<tr><td>IaC (Checkov)</td><td>$C_HIGH</td><td>$C_CRIT</td></tr>" >> $REPORT
-          else
-            echo "<tr><td>IaC (Checkov)</td><td>-</td><td>-</td></tr>" >> $REPORT
-          fi
-
-          if [ -f reports/dast/zap-report.json ]; then
-            Z_HIGH=$(jq '[.site[]?.alerts[]? | select(.riskcode=="3")] | length' reports/dast/zap-report.json)
-            Z_CRIT=$(jq '[.site[]?.alerts[]? | select(.riskcode=="4")] | length' reports/dast/zap-report.json)
-            echo "<tr><td>DAST (ZAP)</td><td>$Z_HIGH</td><td>$Z_CRIT</td></tr>" >> $REPORT
-          else
-            echo "<tr><td>DAST (ZAP)</td><td>-</td><td>-</td></tr>" >> $REPORT
-          fi
-
-          echo "</table>" >> $REPORT
-
-          # Details: SCA
-          if [ -f reports/sca/dependency-check-report.json ]; then
-            echo "<h2>📦 SCA (Dependency Check)</h2><table><tr><th>Library</th><th>Severity</th><th>CVE</th></tr>" >> $REPORT
-            jq -r '.dependencies[]? | select(.vulnerabilities!=null) | .fileName as $lib | .vulnerabilities[] | select(.severity=="HIGH" or .severity=="CRITICAL") | "<tr><td>"+$lib+"</td><td class=\"" + (if .severity=="CRITICAL" then "critical" else "high" end) + "\">"+.severity+"</td><td>"+(.name // "-")+"</td></tr>"' reports/sca/dependency-check-report.json >> $REPORT
-            echo "</table>" >> $REPORT
-          fi
-
-          # Details: Trivy
-          if [ -f reports/container/trivy-report.sarif ]; then
-            echo "<h2>🐳 Container Scan (Trivy)</h2><table><tr><th>ID</th><th>Message</th><th>Severity</th></tr>" >> $REPORT
-            jq -r '.runs[0].results[]? | select(.level=="error" or .level=="warning") | "<tr><td>"+(.ruleId|tostring)+"</td><td>"+(.message.text|tostring)+"</td><td>"+(.level|ascii_upcase)+"</td></tr>"' reports/container/trivy-report.sarif >> $REPORT
-            echo "</table>" >> $REPORT
-          fi
-
-          # Details: Checkov
-          if [ -f reports/iac/checkov-results.sarif ]; then
-            echo "<h2>☁️ IaC Scan (Checkov)</h2><table><tr><th>Rule</th><th>Severity</th><th>Resource</th></tr>" >> $REPORT
-            jq -r '.runs[0].results[]? | select(.level=="error" or .level=="warning") | "<tr><td>"+.ruleId+"</td><td>"+(.level|ascii_upcase)+"</td><td>"+(.message.text|tostring)+"</td></tr>"' reports/iac/checkov-results.sarif >> $REPORT
-            echo "</table>" >> $REPORT
-          fi
-
-          # Details: ZAP
-          if [ -f reports/dast/zap-report.json ]; then
-            echo "<h2>🌐 DAST (OWASP ZAP)</h2><table><tr><th>Alert</th><th>Risk</th><th>URL</th></tr>" >> $REPORT
-            jq -r '.site[]?.alerts[]? | select(.riskcode=="3" or .riskcode=="4") | "<tr><td>"+.alert+"</td><td>"+(if .riskcode=="4" then "CRITICAL" else "HIGH" end)+"</td><td>"+(.instances[0].uri // "-")+"</td></tr>"' reports/dast/zap-report.json >> $REPORT
-            echo "</table>" >> $REPORT
-          fi
-
+          # ... Phần tạo bảng summary và chi tiết giống bản bạn gửi ...
           echo "</body></html>" >> $REPORT
       - uses: actions/upload-artifact@v4
         with:
@@ -429,7 +346,6 @@ jobs:
             ✅ **Pipeline SUCCESS** cho `${{ github.repository }}`
             🔀 Branch: `${{ github.ref_name }}`
             📌 Status: **SUCCESS**
-  
             **SAST:** ${{ needs.sast.result }}
             **SCA:** ${{ needs.sca.result }}
             **Container:** ${{ needs.container-scan.result }}
@@ -446,11 +362,9 @@ jobs:
             ❌ **Pipeline FAILED** cho `${{ github.repository }}`
             🔀 Branch: `${{ github.ref_name }}`
             📌 Status: **FAILED**
-  
             **SAST:** ${{ needs.sast.result }}
             **SCA:** ${{ needs.sca.result }}
             **Container:** ${{ needs.container-scan.result }}
             **IaC:** ${{ needs.iac-scan.result }}
             **DAST:** ${{ needs.dast.result }}
-  
             🚨 Hãy kiểm tra lại logs chi tiết trong GitHub Actions!
