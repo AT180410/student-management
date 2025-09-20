@@ -402,19 +402,42 @@ jobs:
   notify:
     name: 📢 Notify Discord
     runs-on: ubuntu-latest
-    needs: [deploy-production, report]
+    needs: report
     if: always()
     steps:
-      - name: Send Discord Notification
+      - name: ✅ Notify Success
+        if: ${{ success() }}
         uses: Ilshidur/action-discord@master
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         with:
-          webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          title: "Pipeline: ${{ github.repository }} - ${{ job.status }}"
-          description: |
-            Pipeline completed for ${{ github.repository }} on ${{ github.ref_name }}
+          args: |
+            ✅ **Pipeline SUCCESS** cho `${{ github.repository }}`
+            🔀 Branch: `${{ github.ref_name }}`
+            📌 Status: **SUCCESS**
+  
             **SAST:** ${{ needs.sast.result }}
             **SCA:** ${{ needs.sca.result }}
             **Container:** ${{ needs.container-scan.result }}
             **IaC:** ${{ needs.iac-scan.result }}
             **DAST:** ${{ needs.dast.result }}
-          color: ${{ job.status == 'success' && '65280' || '16711680' }}
+  
+      - name: ❌ Notify Failure
+        if: ${{ failure() }}
+        uses: Ilshidur/action-discord@master
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        with:
+          args: |
+            ❌ **Pipeline FAILED** cho `${{ github.repository }}`
+            🔀 Branch: `${{ github.ref_name }}`
+            📌 Status: **FAILED**
+  
+            **SAST:** ${{ needs.sast.result }}
+            **SCA:** ${{ needs.sca.result }}
+            **Container:** ${{ needs.container-scan.result }}
+            **IaC:** ${{ needs.iac-scan.result }}
+            **DAST:** ${{ needs.dast.result }}
+  
+            🚨 Hãy kiểm tra lại logs chi tiết trong GitHub Actions!
+
