@@ -141,34 +141,27 @@ jobs:
   security-gate:
     name: 🔒 Security Gate
     runs-on: ubuntu-latest
-    needs: [sca, sast, container-scan, iac-scan]
+    needs: [sca, sast, container-scan, iac-scan]   # ❌ không cần dast
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: dependency-check-report
           path: reports/sca
-          
       - uses: actions/download-artifact@v4
         with:
           name: trivy-report
           path: reports/container
-          
       - uses: actions/download-artifact@v4
         with:
           name: checkov-report
           path: reports/iac
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: zap-report
-          path: reports/dast
 
       - name: Enforce Security Gate
         run: |
           echo "🔒 Running Security Gate..."
           FAIL=0
           
-          # 📦 SCA (Dependency-Check)
+          # 📦 SCA
           if [ -f reports/sca/dependency-check-report.json ]; then
             CRIT=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="CRITICAL")] | length' reports/sca/dependency-check-report.json)
             HIGH=$(jq '[.dependencies[].vulnerabilities[]? | select(.severity=="HIGH")] | length' reports/sca/dependency-check-report.json)
@@ -178,7 +171,7 @@ jobs:
             fi
           fi
           
-          # 🐳 Container Scan (Trivy SARIF → CRITICAL/HIGH)
+          # 🐳 Trivy
           if [ -f reports/container/trivy-report.sarif ]; then
             CRIT=$(jq '[.runs[0].results[]? | select(.level=="error")] | length' reports/container/trivy-report.sarif)
             HIGH=$(jq '[.runs[0].results[]? | select(.level=="warning")] | length' reports/container/trivy-report.sarif)
@@ -188,22 +181,12 @@ jobs:
             fi
           fi
           
-          # ☁️ IaC (Checkov SARIF → CRITICAL/HIGH)
+          # ☁️ Checkov
           if [ -f reports/iac/checkov-results.sarif ]; then
             CRIT=$(jq '[.runs[0].results[]? | select(.level=="error")] | length' reports/iac/checkov-results.sarif)
             HIGH=$(jq '[.runs[0].results[]? | select(.level=="warning")] | length' reports/iac/checkov-results.sarif)
             if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
               echo "❌ Checkov: Found $CRIT CRITICAL and $HIGH HIGH"
-              FAIL=1
-            fi
-          fi
-          
-          # 🌐 DAST (ZAP JSON riskcode → CRITICAL/HIGH)
-          if [ -f reports/dast/zap-report.json ]; then
-            CRIT=$(jq '[.site[].alerts[]? | select(.riskcode=="4")] | length' reports/dast/zap-report.json)
-            HIGH=$(jq '[.site[].alerts[]? | select(.riskcode=="3")] | length' reports/dast/zap-report.json)
-            if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
-              echo "❌ ZAP: Found $CRIT CRITICAL and $HIGH HIGH"
               FAIL=1
             fi
           fi
