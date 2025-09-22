@@ -345,43 +345,43 @@ jobs:
           heroku git:remote -a ${{ secrets.HEROKU_APP_NAME }}
           git push heroku main
 
-  # report:
-  #   name: 📊 Unified Security Report (HTML)
-  #   runs-on: ubuntu-latest
-  #   needs: [sca, sast, container-scan, iac-scan, dast]
-  #   if: always()
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         name: dependency-check-report
-  #         path: reports/sca
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         name: trivy-report
-  #         path: reports/container
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         name: checkov-report
-  #         path: reports/iac
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         name: zap-report
-  #         path: reports/dast
-  #     - name: Generate Unified HTML Report
-  #       run: |
-  #         mkdir -p reports/final
-  #         REPORT=reports/final/security-report.html
-  #         echo "<html><body><h1>Security Report</h1>" > $REPORT
-  #         echo "<h2>SCA</h2><pre>$(cat reports/sca/* || true)</pre>" >> $REPORT
-  #         echo "<h2>Container</h2><pre>$(cat reports/container/* || true)</pre>" >> $REPORT
-  #         echo "<h2>IaC</h2><pre>$(cat reports/iac/* || true)</pre>" >> $REPORT
-  #         echo "<h2>DAST</h2><pre>$(cat reports/dast/* || true)</pre>" >> $REPORT
-  #         echo "</body></html>" >> $REPORT
-  #     - uses: actions/upload-artifact@v4
-  #       with:
-  #         name: security-report
-  #         path: reports/final/security-report.html
+  report:
+    name: 📊 Unified Security Report (HTML)
+    runs-on: ubuntu-latest
+    needs: [sca, sast, container-scan, iac-scan]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dependency-check-report
+          path: reports/sca
+      - uses: actions/download-artifact@v4
+        with:
+          name: trivy-report
+          path: reports/container
+      - uses: actions/download-artifact@v4
+        with:
+          name: checkov-report
+          path: reports/iac
+      - uses: actions/download-artifact@v4
+        with:
+          name: zap-report
+          path: reports/dast
+      - name: Generate Unified HTML Report
+        run: |
+          mkdir -p reports/final
+          REPORT=reports/final/security-report.html
+          echo "<html><body><h1>Security Report</h1>" > $REPORT
+          echo "<h2>SCA</h2><pre>$(cat reports/sca/* || true)</pre>" >> $REPORT
+          echo "<h2>Container</h2><pre>$(cat reports/container/* || true)</pre>" >> $REPORT
+          echo "<h2>IaC</h2><pre>$(cat reports/iac/* || true)</pre>" >> $REPORT
+          echo "<h2>DAST</h2><pre>$(cat reports/dast/* || true)</pre>" >> $REPORT
+          echo "</body></html>" >> $REPORT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: reports/final/security-report.html
 
   notify:
     name: 📢 Notify Discord
