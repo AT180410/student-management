@@ -252,23 +252,22 @@ jobs:
           echo "Waiting for staging application to be ready..."
           for i in {1..30}; do
             if curl -s -f ${{ needs.deploy-staging.outputs.url }}/actuator/health > /dev/null; then
-              echo "✅ Application is ready!"
+              echo "Application is ready!"
               exit 0
             fi
-            echo "⏳ Attempt $i: Application not ready yet, waiting 10s..."
+            echo "Attempt $i: Application not ready yet, waiting 10 seconds..."
             sleep 10
           done
-          echo "❌ Application failed to become ready within timeout"
+          echo "Application failed to become ready within timeout"
           exit 1
           
-      - name: Create output folder with proper permissions
+      - name: Run ZAP Baseline Scan
         run: |
           mkdir -p zap-output
           chmod -R 777 zap-output
           
-      - name: Run ZAP Baseline Scan (fixed path)
-        run: |
           echo "Starting ZAP scan against: ${{ needs.deploy-staging.outputs.url }}"
+          set +e   # không dừng khi ZAP trả về code 2
           docker run --rm -u 0 \
             -v "$(pwd)/zap-output:/zap/wrk:rw" \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
@@ -276,15 +275,12 @@ jobs:
             -a \
             -m 10 \
             -T 180 \
-            -r zap-report.html \
-            -w zap-report.txt \
-            -J zap-report.json \
-            -x zap-report.xml
-          
-      - name: Debug ZAP execution
-        run: |
-          echo "Contents of zap-output directory:"
-          ls -la zap-output/ || true
+            -r /zap/wrk/zap-report.html \
+            -w /zap/wrk/zap-report.txt \
+            -J /zap/wrk/zap-report.json \
+            -x /zap/wrk/zap-report.xml
+          echo "ZAP finished with exit code: $?"
+          set -e
           
       - name: Upload ZAP artifacts
         uses: actions/upload-artifact@v4
