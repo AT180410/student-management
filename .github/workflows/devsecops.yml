@@ -324,23 +324,13 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.security-gate.outputs.passed == 'true'
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Heroku CLI
-        run: |
-          curl https://cli-assets.heroku.com/install.sh | sh
-          
-      - name: Login to Heroku
-        run: |
-          heroku login --api-key ${{ secrets.HEROKU_API_KEY }}
-          
-      - name: Set Heroku environment variables
-        run: |
-          heroku config:set DB_SCHEMA=${{ secrets.DB_SCHEMA_PROD }} --app ${{ secrets.HEROKU_APP_NAME }}
-          
+  
       - name: Deploy to Heroku
-        run: |
-          heroku git:remote -a ${{ secrets.HEROKU_APP_NAME }}
-          git push heroku main
+        uses: akhileshns/heroku-deploy@v3.12.12
+        with:
+          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
+          heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}
+          heroku_email: ${{ secrets.HEROKU_EMAIL }}
 
   report:
     name: 📊 Unified Security Report (HTML)
