@@ -31,13 +31,6 @@ jobs:
         with:
           name: app-jar
           path: target/*.jar
-      - name: Set DB Config (Schema + DB URL)
-        run: |
-          if [[ "${GITHUB_REF##*/}" == "main" ]]; then
-            echo "DB_SCHEMA=${{ secrets.DB_SCHEMA_PROD }}" >> $GITHUB_ENV
-          else
-            echo "DB_SCHEMA=${{ secrets.DB_SCHEMA_TEST }}" >> $GITHUB_ENV
-          fi
 
   sca:
     name: SCA (Dependency Check)
@@ -349,6 +342,7 @@ jobs:
       - name: Deploy to Heroku
         run: |
           # Deploy using Heroku CLI
+          echo "DB_SCHEMA=${{ secrets.DB_SCHEMA_PROD }}" >> $GITHUB_ENV
           heroku git:remote -a ${{ secrets.HEROKU_APP_NAME }}
           git push heroku main
 
