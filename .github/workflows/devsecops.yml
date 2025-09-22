@@ -348,7 +348,7 @@ jobs:
   report:
     name: 📊 Unified Security Report (HTML)
     runs-on: ubuntu-latest
-    needs: [sca, sast, container-scan, iac-scan]
+    needs: [sca, sast, container-scan, iac-scan,dast]
     if: always()
     steps:
       - uses: actions/checkout@v4
@@ -364,10 +364,10 @@ jobs:
         with:
           name: checkov-report
           path: reports/iac
-      - uses: actions/download-artifact@v4
-        with:
-          name: zap-report
-          path: reports/dast
+      # - uses: actions/download-artifact@v4
+      #   with:
+      #     name: zap-report
+      #     path: reports/dast
       - name: Generate Unified HTML Report
         run: |
           mkdir -p reports/final
