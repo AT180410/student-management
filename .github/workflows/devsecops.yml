@@ -266,7 +266,7 @@ jobs:
           mkdir -p zap-output
           chmod -R 777 zap-output
           
-      - name: Run ZAP Baseline Scan (fix permission)
+      - name: Run ZAP Baseline Scan (fixed path)
         run: |
           echo "Starting ZAP scan against: ${{ needs.deploy-staging.outputs.url }}"
           docker run --rm -u 0 \
@@ -276,10 +276,10 @@ jobs:
             -a \
             -m 10 \
             -T 180 \
-            -r /zap/wrk/zap-report.html \
-            -w /zap/wrk/zap-report.txt \
-            -J /zap/wrk/zap-report.json \
-            -x /zap/wrk/zap-report.xml
+            -r zap-report.html \
+            -w zap-report.txt \
+            -J zap-report.json \
+            -x zap-report.xml
           
       - name: Debug ZAP execution
         run: |
