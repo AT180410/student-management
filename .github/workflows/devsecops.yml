@@ -261,6 +261,11 @@ jobs:
           echo "Application failed to become ready within timeout"
           exit 1
           
+      - name: Verify application accessibility
+        run: |
+          echo "Testing connection to: ${{ needs.deploy-staging.outputs.url }}"
+          curl -v --retry 5 --retry-delay 10 --max-time 30 ${{ needs.deploy-staging.outputs.url }}
+          
       - name: Create output folder with proper permissions
         run: |
           mkdir -p zap-output
@@ -268,38 +273,41 @@ jobs:
           
       - name: Run ZAP Baseline Scan
         run: |
-          if ! curl -s -f ${{ needs.deploy-staging.outputs.url }} > /dev/null; then
-            echo "ERROR: Cannot connect to application at ${{ needs.deploy-staging.outputs.url }}"
-            exit 1
-          fi
-          
           echo "Starting ZAP scan against: ${{ needs.deploy-staging.outputs.url }}"
           
           docker run --rm -u $(id -u) \
-            -e HOME=/zap/wrk \
             -v "$(pwd)/zap-output:/zap/wrk:rw" \
-            -e ZAP_AUTH_HEADER="Authorization" \
-            -e ZAP_AUTH_HEADER_VALUE="Bearer ${{ secrets.STAGING_AUTH_TOKEN }}" \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
             -t "${{ needs.deploy-staging.outputs.url }}" \
             -a \
-            -m 5 \
-            -T 120 \
+            -m 10 \
+            -T 180 \
             -r /zap/wrk/zap-report.html \
             -w /zap/wrk/zap-report.txt \
             -J /zap/wrk/zap-report.json \
-            -x /zap/wrk/zap-report.xml || [ $? -eq 3 ]
+            -x /zap/wrk/zap-report.xml
           
           echo "ZAP scan completed with exit code: $?"
           
-      - name: Check if reports were generated
+      - name: Debug ZAP execution
         run: |
-          echo "Checking for generated reports:"
+          echo "Contents of zap-output directory:"
           ls -la zap-output/
           
+          if [ -f "zap-output/zap.yaml" ]; then
+            echo "Contents of zap.yaml:"
+            cat zap-output/zap.yaml
+          fi
+          
+      - name: Check if reports were generated
+        run: |
           if [ ! -f "zap-output/zap-report.html" ]; then
             echo "ERROR: ZAP report was not generated!"
-            echo "<html><body><h1>No ZAP report generated</h1></body></html>" > zap-output/zap-report.html
+            # Try alternative ZAP approach
+            docker run --rm -v $(pwd):/zap/wrk:rw \
+              ghcr.io/zaproxy/zaproxy:stable zap.sh \
+              -cmd -quickurl "${{ needs.deploy-staging.outputs.url }}" \
+              -quickout /zap/wrk/zap-output/zap-report.xml
           fi
           
       - name: Upload ZAP artifacts
@@ -307,18 +315,7 @@ jobs:
         with:
           name: zap-report
           path: zap-output/*
-          
-      - name: Convert to SARIF format (optional)
-        run: |
-          if [ -f "zap-output/zap-report.json" ]; then
-            echo "Converting ZAP report to SARIF format..."
-            exit 0
-          else
-            echo "No JSON report found for conversion"
-            exit 0
-          fi
-        continue-on-error: true
-
+        
 # Deploy to Production (Heroku) - only on main branch
   deploy-production:
     name: 🚀 Deploy to Production (Heroku)
