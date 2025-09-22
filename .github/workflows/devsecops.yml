@@ -298,20 +298,24 @@ jobs:
       github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-
+  
       # Cài Heroku CLI
-      - name: Set up Heroku CLI
-        uses: heroku/actions/setup@v2
-
+      - name: Install Heroku CLI
+        run: curl https://cli-assets.heroku.com/install.sh | sh
+  
+      # Login Heroku Container Registry
       - name: Log in to Heroku Container Registry
         run: echo "${{ secrets.HEROKU_API_KEY }}" | docker login --username=_ --password-stdin registry.heroku.com
-
+  
+      # Build Docker image (dùng Dockerfile trong repo)
       - name: Build Docker image
         run: docker build -t registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web .
-
+  
+      # Push Docker image lên Heroku
       - name: Push Docker image to Heroku
         run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
-
+  
+      # Release app từ Docker image
       - name: Release app on Heroku
         run: heroku container:release web --app ${{ secrets.HEROKU_APP_NAME }}
         env:
