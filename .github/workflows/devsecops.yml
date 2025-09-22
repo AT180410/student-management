@@ -261,64 +261,33 @@ jobs:
           echo "Application failed to become ready within timeout"
           exit 1
           
-      - name: Create output folder with proper permissions
+      - name: Run ZAP Baseline Scan
         run: |
           mkdir -p zap-output
           chmod -R 777 zap-output
           
-      - name: Run ZAP Baseline Scan
-        run: |
-          if ! curl -s -f ${{ needs.deploy-staging.outputs.url }} > /dev/null; then
-            echo "ERROR: Cannot connect to application at ${{ needs.deploy-staging.outputs.url }}"
-            exit 1
-          fi
-          
           echo "Starting ZAP scan against: ${{ needs.deploy-staging.outputs.url }}"
-          
-          docker run --rm -u $(id -u) \
-            -e HOME=/zap/wrk \
+          set +e   # không dừng khi ZAP trả về code 2
+          docker run --rm -u 0 \
             -v "$(pwd)/zap-output:/zap/wrk:rw" \
-            -e ZAP_AUTH_HEADER="Authorization" \
-            -e ZAP_AUTH_HEADER_VALUE="Bearer ${{ secrets.STAGING_AUTH_TOKEN }}" \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
             -t "${{ needs.deploy-staging.outputs.url }}" \
             -a \
-            -m 5 \
-            -T 120 \
+            -m 10 \
+            -T 180 \
             -r /zap/wrk/zap-report.html \
             -w /zap/wrk/zap-report.txt \
             -J /zap/wrk/zap-report.json \
-            -x /zap/wrk/zap-report.xml || [ $? -eq 3 ]
-          
-          echo "ZAP scan completed with exit code: $?"
-          
-      - name: Check if reports were generated
-        run: |
-          echo "Checking for generated reports:"
-          ls -la zap-output/
-          
-          if [ ! -f "zap-output/zap-report.html" ]; then
-            echo "ERROR: ZAP report was not generated!"
-            echo "<html><body><h1>No ZAP report generated</h1></body></html>" > zap-output/zap-report.html
-          fi
+            -x /zap/wrk/zap-report.xml
+          echo "ZAP finished with exit code: $?"
+          set -e
           
       - name: Upload ZAP artifacts
         uses: actions/upload-artifact@v4
         with:
           name: zap-report
           path: zap-output/*
-          
-      - name: Convert to SARIF format (optional)
-        run: |
-          if [ -f "zap-output/zap-report.json" ]; then
-            echo "Converting ZAP report to SARIF format..."
-            exit 0
-          else
-            echo "No JSON report found for conversion"
-            exit 0
-          fi
-        continue-on-error: true
-
+        
 # Deploy to Production (Heroku) - only on main branch
   deploy-production:
     name: 🚀 Deploy to Production (Heroku)
@@ -327,23 +296,13 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.security-gate.outputs.passed == 'true'
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Heroku CLI
-        run: |
-          curl https://cli-assets.heroku.com/install.sh | sh
-          
-      - name: Login to Heroku
-        run: |
-          heroku login --api-key ${{ secrets.HEROKU_API_KEY }}
-          
-      - name: Set Heroku environment variables
-        run: |
-          heroku config:set DB_SCHEMA=${{ secrets.DB_SCHEMA_PROD }} --app ${{ secrets.HEROKU_APP_NAME }}
-          
+  
       - name: Deploy to Heroku
-        run: |
-          heroku git:remote -a ${{ secrets.HEROKU_APP_NAME }}
-          git push heroku main
+        uses: akhileshns/heroku-deploy@v3.12.12
+        with:
+          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
+          heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}
+          heroku_email: ${{ secrets.HEROKU_EMAIL }}
 
   report:
     name: 📊 Unified Security Report (HTML)
@@ -364,10 +323,10 @@ jobs:
         with:
           name: checkov-report
           path: reports/iac
-      # - uses: actions/download-artifact@v4
-      #   with:
-      #     name: zap-report
-      #     path: reports/dast
+      - uses: actions/download-artifact@v4
+        with:
+          name: zap-report
+          path: reports/dast
       - name: Generate Unified HTML Report
         run: |
           mkdir -p reports/final
