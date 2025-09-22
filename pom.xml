@@ -75,8 +75,8 @@
         </dependency>
     </dependencies>
 
-    <!-- Override Tomcat to secure version -->
-    <dependencyManagement>
+<!--     Override Tomcat to secure version -->
+<!--     <dependencyManagement>
         <dependencies>
             <dependency>
                 <groupId>org.apache.tomcat.embed</groupId>
@@ -95,7 +95,7 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
-
+ -->
     <build>
         <plugins>
             <!-- Spring Boot Plugin -->
