@@ -351,10 +351,10 @@ jobs:
         with:
           name: checkov-report
           path: reports/iac
-      # - uses: actions/download-artifact@v4
-      #   with:
-      #     name: zap-report
-      #     path: reports/dast
+      - uses: actions/download-artifact@v4
+        with:
+          name: zap-report
+          path: reports/dast
       - name: Generate Unified HTML Report
         run: |
           mkdir -p reports/final
