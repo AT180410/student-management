@@ -35,14 +35,8 @@ jobs:
         run: |
           if [[ "${GITHUB_REF##*/}" == "main" ]]; then
             echo "DB_SCHEMA=${{ secrets.DB_SCHEMA_PROD }}" >> $GITHUB_ENV
-            echo "DATABASE_URL=${{ secrets.DATABASE_URL_PROD }}" >> $GITHUB_ENV
-            echo "DATABASE_USERNAME=${{ secrets.DATABASE_USERNAME_PROD }}" >> $GITHUB_ENV
-            echo "DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD_PROD }}" >> $GITHUB_ENV
           else
             echo "DB_SCHEMA=${{ secrets.DB_SCHEMA_TEST }}" >> $GITHUB_ENV
-            echo "DATABASE_URL=${{ secrets.DATABASE_URL_TEST }}" >> $GITHUB_ENV
-            echo "DATABASE_USERNAME=${{ secrets.DATABASE_USERNAME_TEST }}" >> $GITHUB_ENV
-            echo "DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD_TEST }}" >> $GITHUB_ENV
           fi
 
   sca:
