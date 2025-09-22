@@ -31,6 +31,19 @@ jobs:
         with:
           name: app-jar
           path: target/*.jar
+      - name: Set DB Config (Schema + DB URL)
+        run: |
+          if [[ "${GITHUB_REF##*/}" == "main" ]]; then
+            echo "DB_SCHEMA=${{ secrets.DB_SCHEMA_PROD }}" >> $GITHUB_ENV
+            echo "DATABASE_URL=${{ secrets.DATABASE_URL_PROD }}" >> $GITHUB_ENV
+            echo "DATABASE_USERNAME=${{ secrets.DATABASE_USERNAME_PROD }}" >> $GITHUB_ENV
+            echo "DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD_PROD }}" >> $GITHUB_ENV
+          else
+            echo "DB_SCHEMA=${{ secrets.DB_SCHEMA_TEST }}" >> $GITHUB_ENV
+            echo "DATABASE_URL=${{ secrets.DATABASE_URL_TEST }}" >> $GITHUB_ENV
+            echo "DATABASE_USERNAME=${{ secrets.DATABASE_USERNAME_TEST }}" >> $GITHUB_ENV
+            echo "DATABASE_PASSWORD=${{ secrets.DATABASE_PASSWORD_TEST }}" >> $GITHUB_ENV
+          fi
 
   sca:
     name: SCA (Dependency Check)
@@ -243,24 +256,84 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy-staging
     if: github.ref == 'refs/heads/test' && needs.deploy-staging.result == 'success'
+    timeout-minutes: 30  # Tăng thời gian timeout
     steps:
       - uses: actions/checkout@v4
-      - name: Create output folder
-        run: mkdir -p zap-output
+      
+      - name: Wait for application to be ready
+        run: |
+          echo "Waiting for staging application to be ready..."
+          for i in {1..30}; do
+            if curl -s -f ${{ needs.deploy-staging.outputs.url }}/actuator/health > /dev/null; then
+              echo "Application is ready!"
+              exit 0
+            fi
+            echo "Attempt $i: Application not ready yet, waiting 10 seconds..."
+            sleep 10
+          done
+          echo "Application failed to become ready within timeout"
+          exit 1
+          
+      - name: Create output folder with proper permissions
+        run: |
+          mkdir -p zap-output
+          chmod -R 777 zap-output  # Đảm bảo quyền ghi
+          
       - name: Run ZAP Baseline Scan
         run: |
-          docker run --rm -u 0 \
-            -v "${{ github.workspace }}/zap-output:/zap/wrk" \
+          # Kiểm tra kết nối đến ứng dụng trước khi quét
+          if ! curl -s -f ${{ needs.deploy-staging.outputs.url }} > /dev/null; then
+            echo "ERROR: Cannot connect to application at ${{ needs.deploy-staging.outputs.url }}"
+            exit 1
+          fi
+          
+          echo "Starting ZAP scan against: ${{ needs.deploy-staging.outputs.url }}"
+          
+          docker run --rm -u $(id -u) \
+            -v "$(pwd)/zap-output:/zap/wrk:rw" \
+            -e ZAP_AUTH_HEADER="Authorization" \
+            -e ZAP_AUTH_HEADER_VALUE="Bearer ${{ secrets.STAGING_AUTH_TOKEN }}" \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t ${{ needs.deploy-staging.outputs.url }} \
+            -t "${{ needs.deploy-staging.outputs.url }}" \
+            -a \
+            -m 5 \
+            -T 120 \
             -r /zap/wrk/zap-report.html \
+            -w /zap/wrk/zap-report.txt \
             -J /zap/wrk/zap-report.json \
-            || true
+            -x /zap/wrk/zap-report.xml
+          
+          echo "ZAP scan completed with exit code: $?"
+          
+      - name: Check if reports were generated
+        run: |
+          echo "Checking for generated reports:"
+          ls -la zap-output/
+          
+          if [ ! -f "zap-output/zap-report.html" ]; then
+            echo "ERROR: ZAP report was not generated!"
+            # Tạo file report rỗng để tránh lỗi upload
+            echo "<html><body><h1>No ZAP report generated</h1></body></html>" > zap-output/zap-report.html
+          fi
+          
       - name: Upload ZAP artifacts
         uses: actions/upload-artifact@v4
         with:
           name: zap-report
           path: zap-output/*
+          
+      - name: Convert to SARIF format (optional)
+        run: |
+          # Cài đặt công cụ chuyển đổi nếu cần
+          if [ -f "zap-output/zap-report.json" ]; then
+            echo "Converting ZAP report to SARIF format..."
+            # Thêm lệnh chuyển đổi ở đây nếu cần
+            exit 0
+          else
+            echo "No JSON report found for conversion"
+            exit 0
+          fi
+        continue-on-error: true
 
   # Deploy to Production (Heroku) - only on main branch
   deploy-production:
