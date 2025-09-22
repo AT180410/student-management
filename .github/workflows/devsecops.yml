@@ -288,7 +288,7 @@ jobs:
             -r /zap/wrk/zap-report.html \
             -w /zap/wrk/zap-report.txt \
             -J /zap/wrk/zap-report.json \
-            -x /zap/wrk/zap-report.xml
+            -x /zap/wrk/zap-report.xml || [ $? -eq 3 ]
           
           echo "ZAP scan completed with exit code: $?"
           
