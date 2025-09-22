@@ -9,7 +9,6 @@ public class StudentManagementApplication {
         SpringApplication.run(StudentManagementApplication.class, args);
         System.out.println("=================================================");
         System.out.println("🎓 Student Management System đã khởi động!");
-        System.out.println("📱 Truy cập: http://localhost:8080");
         System.out.println("=================================================");
     }
 }
