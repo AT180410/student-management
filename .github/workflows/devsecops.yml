@@ -169,34 +169,28 @@ jobs:
           if [ -f reports/container/trivy-report.sarif ]; then
             echo "🐳 Analyzing Container Scan results..."
             CRITICAL_COUNT=$(jq -r '.runs[0].results[]? | select(.properties.overrideSeverity == "CRITICAL") | .ruleId' reports/container/trivy-report.sarif | wc -l)
-            HIGH_COUNT=$(jq -r '.runs[0].results[]? | select(.properties.overrideSeverity == "HIGH") | .ruleId' reports/container/trivy-report.sarif | wc -l)
             if [ "$CRITICAL_COUNT" -gt 0 ]; then
               echo "❌ Container scan found $CRITICAL_COUNT CRITICAL vulnerabilities"
               FAIL=1
             fi
-            echo "ℹ️ Container scan HIGH vulnerabilities: $HIGH_COUNT"
           fi
 
           # SCA scan
           if [ -f reports/sca/dependency-check-report.json ]; then
             CRIT_COUNT=$(jq '[.dependencies[]?.vulnerabilities[]? | select(.severity == "CRITICAL")] | length' reports/sca/dependency-check-report.json)
-            HIGH_COUNT=$(jq '[.dependencies[]?.vulnerabilities[]? | select(.severity == "HIGH")] | length' reports/sca/dependency-check-report.json)
             if [ "$CRIT_COUNT" -gt 0 ]; then
               echo "❌ SCA found $CRIT_COUNT CRITICAL vulnerabilities"
               FAIL=1
             fi
-            echo "ℹ️ SCA HIGH vulnerabilities: $HIGH_COUNT"
           fi
 
           # IaC scan
           if [ -f reports/iac/checkov-results.sarif ]; then
             CRIT_COUNT=$(jq '[.runs[0].results[]? | select((.properties.severity? // "") == "CRITICAL" or (.level=="error"))] | length' reports/iac/checkov-results.sarif)
-            HIGH_COUNT=$(jq '[.runs[0].results[]? | select((.properties.severity? // "") == "HIGH" or (.level=="warning"))] | length' reports/iac/checkov-results.sarif)
             if [ "$CRIT_COUNT" -gt 0 ]; then
               echo "❌ IaC scan found $CRIT_COUNT CRITICAL vulnerabilities"
               FAIL=1
             fi
-            echo "ℹ️ IaC HIGH vulnerabilities: $HIGH_COUNT"
           fi
 
           if [ "$FAIL" -eq 1 ]; then
@@ -220,7 +214,7 @@ jobs:
       - name: Set environment URL
         id: set-url
         run: |
-          echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
+          echo "url=https://student-management-test.onrender.com" >> $GITHUB_OUTPUT
       - name: Trigger Render Deploy
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
@@ -268,21 +262,28 @@ jobs:
           name: zap-report
           path: zap-output/*
 
-  # Deploy to Production (Railway) - only on main branch
+  # Deploy to Production (Heroku) - only on main branch
   deploy-production:
-    name: 🚀 Deploy to Production (Railway)
+    name: 🚀 Deploy to Production (Heroku)
     runs-on: ubuntu-latest
     needs: security-gate
     if: github.ref == 'refs/heads/main' && needs.security-gate.outputs.passed == 'true'
     steps:
       - uses: actions/checkout@v4
-      - name: Deploy to Railway
-        uses: railwayapp/cli-action@v1.0.0
-        with:
-          railway-token: ${{ secrets.RAILWAY_TOKEN }}
-          command: deploy --service student-management-prod --detach
-        env:
-          RAILWAY_ENVIRONMENT: production
+      
+      - name: Setup Heroku CLI
+        run: |
+          curl https://cli-assets.heroku.com/install.sh | sh
+          
+      - name: Login to Heroku
+        run: |
+          heroku login --api-key ${{ secrets.HEROKU_API_KEY }}
+          
+      - name: Deploy to Heroku
+        run: |
+          # Deploy using Heroku CLI
+          heroku git:remote -a ${{ secrets.HEROKU_APP_NAME }}
+          git push heroku main
 
   report:
     name: 📊 Unified Security Report (HTML)
@@ -312,10 +313,10 @@ jobs:
           mkdir -p reports/final
           REPORT=reports/final/security-report.html
           echo "<html><body><h1>Security Report</h1>" > $REPORT
-          echo "<h2>SCA</h2><pre>$(cat reports/sca/* || true)</pre>" >> $REPORT
-          echo "<h2>Container</h2><pre>$(cat reports/container/* || true)</pre>" >> $REPORT
-          echo "<h2>IaC</h2><pre>$(cat reports/iac/* || true)</pre>" >> $REPORT
-          echo "<h2>DAST</h2><pre>$(cat reports/dast/* || true)</pre>" >> $REPORT
+          echo "<h2>SCA</h2><pre>$(cat reports/sca/* || echo 'No SCA report')</pre>" >> $REPORT
+          echo "<h2>Container</h2><pre>$(cat reports/container/* || echo 'No container scan report')</pre>" >> $REPORT
+          echo "<h2>IaC</h2><pre>$(cat reports/iac/* || echo 'No IaC scan report')</pre>" >> $REPORT
+          echo "<h2>DAST</h2><pre>$(cat reports/dast/* || echo 'No DAST report')</pre>" >> $REPORT
           echo "</body></html>" >> $REPORT
       - uses: actions/upload-artifact@v4
         with:
@@ -328,34 +329,20 @@ jobs:
     needs: [deploy-staging, deploy-production, report]
     if: always()
     steps:
-      - name: ✅ Notify Success
-        if: ${{ success() }}
+      - name: Send Discord Notification
         uses: Ilshidur/action-discord@master
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         with:
           args: |
-            ✅ **Pipeline SUCCESS** cho `${{ github.repository }}`
+            ${{ contains(needs.*.result, 'failure') && '❌' || '✅' }} **Pipeline ${{ contains(needs.*.result, 'failure') && 'FAILED' || 'SUCCESS' }}** cho `${{ github.repository }}`
             🔀 Branch: `${{ github.ref_name }}`
-            📌 Status: **SUCCESS**
-            **SAST:** ${{ needs.sast.result }}
-            **SCA:** ${{ needs.sca.result }}
-            **Container:** ${{ needs.container-scan.result }}
-            **IaC:** ${{ needs.iac-scan.result }}
-            **DAST:** ${{ needs.dast.result }}
-      - name: ❌ Notify Failure
-        if: ${{ failure() }}
-        uses: Ilshidur/action-discord@master
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        with:
-          args: |
-            ❌ **Pipeline FAILED** cho `${{ github.repository }}`
-            🔀 Branch: `${{ github.ref_name }}`
-            📌 Status: **FAILED**
-            **SAST:** ${{ needs.sast.result }}
-            **SCA:** ${{ needs.sca.result }}
-            **Container:** ${{ needs.container-scan.result }}
-            **IaC:** ${{ needs.iac-scan.result }}
-            **DAST:** ${{ needs.dast.result }}
-            🚨 Hãy kiểm tra lại logs chi tiết trong GitHub Action
+            📊 **Results:**
+            • SAST: ${{ needs.sast.result }}
+            • SCA: ${{ needs.sca.result }}
+            • Container Scan: ${{ needs.container-scan.result }}
+            • IaC Scan: ${{ needs.iac-scan.result }}
+            • DAST: ${{ needs.dast.result }}
+            • Staging Deploy: ${{ needs.deploy-staging.result }}
+            • Production Deploy: ${{ needs.deploy-production.result }}
+            ${{ contains(needs.*.result, 'failure') && '🚨 Hãy kiểm tra lại logs chi tiết trong GitHub Action' || '🎉 Deploy thành công!' }}
