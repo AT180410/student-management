@@ -51,16 +51,15 @@ jobs:
           restore-keys: |
             dependency-check-${{ runner.os }}-
   
-      - name: Run Dependency Check
+      - name: Run Dependency Check 
         env:
           OSSINDEX_USER: ${{ secrets.OSSINDEX_USER }}
           OSSINDEX_PASS: ${{ secrets.OSSINDEX_PASS }}
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           ./mvnw org.owasp:dependency-check-maven:check \
-            -Dformats=JSON,HTML,XML \
-            -Dnvd.api.enabled=true \
-            -Dnvd.api.key=${NVD_API_KEY} \
+            -Dformats=JSON,HTML \
+            -DoutputDirectory=target/dependency-check \
+            -Dnvd.api.enabled=false \
             -Danalyzer.ossindex.enabled=true \
             -Danalyzer.ossindex.username=${OSSINDEX_USER} \
             -Danalyzer.ossindex.password=${OSSINDEX_PASS} \
@@ -68,16 +67,10 @@ jobs:
             -Dnvd.failOnError=false \
             --fail-never
   
-      - name: Debug reports
-        run: ls -lah target | grep dependency-check || echo "⚠️ No reports generated"
-  
       - uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
-          path: |
-            target/dependency-check-report.html
-            target/dependency-check-report.json
-            target/dependency-check-report.xml
+          path: target/dependency-check/*
           
   sast:
     name: SAST (SonarCloud)
