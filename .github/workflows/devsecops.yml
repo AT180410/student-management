@@ -244,27 +244,28 @@ jobs:
         id: set-url
         run: |
           echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
-
+  
       - name: Trigger Render Deploy (use Authorization header)
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID_TEST }}
         run: |
-          # use header for secrets (do NOT include token in URL)
+          echo "🚀 Triggering Render deploy for service: $SERVICE_ID"
           curl --silent --show-error --fail -X POST \
-            "https://api.render.com/deploy/srv-${SERVICE_ID}/deploys" \
+            "https://api.render.com/v1/services/${SERVICE_ID}/deploys" \
             -H "Authorization: Bearer ${RENDER_API_KEY}" \
             -H "Accept: application/json"
-
+  
       - name: Wait for deployment to be ready
         run: |
           TARGET=${{ steps.set-url.outputs.url }}
+          echo "⏳ Waiting for $TARGET to become healthy..."
           for i in {1..20}; do
-            if curl --silent --fail $TARGET/actuator/health > /dev/null; then
-              echo "✅ Application is healthy!"
+            if curl --silent --fail "$TARGET/actuator/health" > /dev/null; then
+              echo "✅ Application is healthy and ready!"
               exit 0
             fi
-            echo "⏳ Application not ready yet, retrying in 10s..."
+            echo "Attempt $i/20: not ready yet, retrying in 10s..."
             sleep 10
           done
           echo "❌ Application failed to start within timeout"
