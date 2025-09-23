@@ -31,54 +31,54 @@ jobs:
         with:
           name: app-jar
           path: target/*.jar
-sca:
-  name: SCA (Dependency Check)
-  runs-on: ubuntu-latest
-  needs: build
-  steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-java@v4
-      with:
-        java-version: '21'
-        distribution: 'temurin'
-    - run: chmod +x ./mvnw
-
-    - name: Cache OWASP Dependency-Check data
-      uses: actions/cache@v4
-      with:
-        path: ~/.m2/repository/org/owasp/dependency-check-data
-        key: dependency-check-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
-        restore-keys: |
-          dependency-check-${{ runner.os }}-
-
-    - name: Run Dependency Check
-      env:
-        OSSINDEX_USER: ${{ secrets.OSSINDEX_USER }}
-        OSSINDEX_PASS: ${{ secrets.OSSINDEX_PASS }}
-        NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-      run: |
-        ./mvnw org.owasp:dependency-check-maven:check \
-          -Dformats=JSON,HTML,XML \
-          -Dnvd.api.enabled=true \
-          -Dnvd.api.key=${NVD_API_KEY} \
-          -Danalyzer.ossindex.enabled=true \
-          -Danalyzer.ossindex.username=${OSSINDEX_USER} \
-          -Danalyzer.ossindex.password=${OSSINDEX_PASS} \
-          -Ddependency-check.skipTestScope=true \
-          -Dnvd.failOnError=false \
-          --fail-never
-
-    - name: Debug reports
-      run: ls -lah target | grep dependency-check || echo "⚠️ No reports generated"
-
-    - uses: actions/upload-artifact@v4
-      with:
-        name: dependency-check-report
-        path: |
-          target/dependency-check-report.html
-          target/dependency-check-report.json
-          target/dependency-check-report.xml
-        
+  sca:
+    name: SCA (Dependency Check)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+      - run: chmod +x ./mvnw
+  
+      - name: Cache OWASP Dependency-Check data
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: dependency-check-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            dependency-check-${{ runner.os }}-
+  
+      - name: Run Dependency Check
+        env:
+          OSSINDEX_USER: ${{ secrets.OSSINDEX_USER }}
+          OSSINDEX_PASS: ${{ secrets.OSSINDEX_PASS }}
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          ./mvnw org.owasp:dependency-check-maven:check \
+            -Dformats=JSON,HTML,XML \
+            -Dnvd.api.enabled=true \
+            -Dnvd.api.key=${NVD_API_KEY} \
+            -Danalyzer.ossindex.enabled=true \
+            -Danalyzer.ossindex.username=${OSSINDEX_USER} \
+            -Danalyzer.ossindex.password=${OSSINDEX_PASS} \
+            -Ddependency-check.skipTestScope=true \
+            -Dnvd.failOnError=false \
+            --fail-never
+  
+      - name: Debug reports
+        run: ls -lah target | grep dependency-check || echo "⚠️ No reports generated"
+  
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: |
+            target/dependency-check-report.html
+            target/dependency-check-report.json
+            target/dependency-check-report.xml
+          
   sast:
     name: SAST (SonarCloud)
     runs-on: ubuntu-latest
