@@ -42,6 +42,7 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
       - run: chmod +x ./mvnw
+  
       - name: Cache OWASP Dependency-Check data
         uses: actions/cache@v4
         with:
@@ -49,20 +50,24 @@ jobs:
           key: dependency-check-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
             dependency-check-${{ runner.os }}-
+  
       - name: Run Dependency Check
         env:
           OSSINDEX_USER: ${{ secrets.OSSINDEX_USER }}
           OSSINDEX_PASS: ${{ secrets.OSSINDEX_PASS }}
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           ./mvnw org.owasp:dependency-check-maven:check \
-            -Dformat=JSON \
+            -Dformat=ALL \
             -Dnvd.api.enabled=true \
+            -Dnvd.api.key=${NVD_API_KEY} \
             -Danalyzer.ossindex.enabled=true \
             -Danalyzer.ossindex.username=${OSSINDEX_USER} \
             -Danalyzer.ossindex.password=${OSSINDEX_PASS} \
-            -Dnvd.failOnError=false \
             -Ddependency-check.skipTestScope=true \
+            -Dnvd.failOnError=false \
             --fail-never
+  
       - uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
@@ -175,14 +180,22 @@ jobs:
           # Container scan (Trivy SARIF)
           if [ -f reports/container/trivy-report.sarif ]; then
             echo "🐳 Analyzing Container Scan results..."
-            CRITICAL_COUNT=$(jq '[.runs[0].results[]? | select((.level // "") == "error" or (.properties.overrideSeverity == "CRITICAL"))] | length' reports/container/trivy-report.sarif)
-            HIGH_COUNT=$(jq '[.runs[0].results[]? | select((.level // "") == "warning" or (.properties.overrideSeverity == "HIGH"))] | length' reports/container/trivy-report.sarif)
+          
+            CRITICAL_COUNT=$(jq '[.runs[].results[]? |
+              select((.properties.overrideSeverity == "CRITICAL") or (.severity == "CRITICAL"))
+            ] | length' reports/container/trivy-report.sarif)
+          
+            HIGH_COUNT=$(jq '[.runs[].results[]? |
+              select((.properties.overrideSeverity == "HIGH") or (.severity == "HIGH"))
+            ] | length' reports/container/trivy-report.sarif)
+          
             if [ "$CRITICAL_COUNT" -gt 0 ]; then
               echo "❌ Container scan found $CRITICAL_COUNT CRITICAL vulnerabilities"
               FAIL=1
             fi
-            echo "ℹ️ Container scan HIGH vulnerabilities: $HIGH_COUNT"
+            echo "ℹ️ Container scan HIGH vulnerabilities: ${HIGH_COUNT:-0}"
           fi
+
 
           # SCA scan (dependency-check JSON)
           if [ -f reports/sca/dependency-check-report.json ]; then
