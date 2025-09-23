@@ -50,36 +50,22 @@ jobs:
           key: dependency-check-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
             dependency-check-${{ runner.os }}-
-      - name: Run Dependency Check (produce JSON + HTML)
+      - name: Run Dependency Check
         run: |
-          set -e
-          # Bật NVD (nguồn chính), tắt OSS Index analyzer để tránh 401/429,
-          # không cho dependency-check tự fail build (Security Gate xử lý sau)
           ./mvnw org.owasp:dependency-check-maven:check \
-            -Dformat=JSON,HTML,XML \
-            -DoutputDirectory=target \
+            -Dformat=JSON \
             -Dnvd.api.enabled=true \
-            -Dossindex.analyzer.enabled=false \
+            -Danalyzer.ossindex.enabled=true \
+            -Danalyzer.ossindex.username=${{ secrets.OSSINDEX_USER }} \
+            -Danalyzer.ossindex.password=${{ secrets.OSSINDEX_PASS }} \
             -Dnvd.failOnError=false \
-            -DfailBuildOnCVSS=11 \
-            -Ddependency-check.skipTestScope=true
-        env:
-          MAVEN_OPTS: "-Xmx2g"
-      - name: Upload dependency-check reports
-        uses: actions/upload-artifact@v4
+            -Ddependency-check.skipTestScope=true \
+            --fail-never
+      - uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
           path: target/dependency-check-report.*
-      - name: Print short dependency-check summary
-        if: always()
-        run: |
-          echo "----- Dependency-Check summary (top lines) -----"
-          if [ -f target/dependency-check-report.json ]; then
-            jq '{dependencies: [.dependencies[] | {fileName: .fileName, vulnerabilities: (.vulnerabilities // []) | length}] }' target/dependency-check-report.json | head -n 200 || true
-          else
-            echo "No dependency-check JSON found."
-          fi
-
+        
   sast:
     name: SAST (SonarCloud)
     runs-on: ubuntu-latest
