@@ -31,7 +31,6 @@ jobs:
         with:
           name: app-jar
           path: target/*.jar
-
   sca:
     name: SCA (Dependency Check)
     runs-on: ubuntu-latest
@@ -51,13 +50,16 @@ jobs:
           restore-keys: |
             dependency-check-${{ runner.os }}-
       - name: Run Dependency Check
+        env:
+          OSSINDEX_USER: ${{ secrets.OSSINDEX_USER }}
+          OSSINDEX_PASS: ${{ secrets.OSSINDEX_PASS }}
         run: |
           ./mvnw org.owasp:dependency-check-maven:check \
             -Dformat=JSON \
             -Dnvd.api.enabled=true \
             -Danalyzer.ossindex.enabled=true \
-            -Danalyzer.ossindex.username=${{ secrets.OSSINDEX_USER }} \
-            -Danalyzer.ossindex.password=${{ secrets.OSSINDEX_PASS }} \
+            -Danalyzer.ossindex.username=${OSSINDEX_USER} \
+            -Danalyzer.ossindex.password=${OSSINDEX_PASS} \
             -Dnvd.failOnError=false \
             -Ddependency-check.skipTestScope=true \
             --fail-never
