@@ -237,7 +237,6 @@ jobs:
           done
           echo "❌ Application failed to start within timeout"
           exit 1
-
   dast:
     name: 🛡️ DAST (OWASP ZAP)
     runs-on: ubuntu-latest
@@ -246,47 +245,35 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      
+  
       - name: Wait for application to be ready
         run: |
           echo "Waiting for staging application to be ready..."
           for i in {1..30}; do
             if curl -s -f ${{ needs.deploy-staging.outputs.url }}/actuator/health > /dev/null; then
-              echo "Application is ready!"
+              echo "✅ Application is ready!"
               exit 0
             fi
-            echo "Attempt $i: Application not ready yet, waiting 10 seconds..."
+            echo "⏳ Attempt $i: Application not ready yet, waiting 10 seconds..."
             sleep 10
           done
-          echo "Application failed to become ready within timeout"
+          echo "❌ Application failed to become ready within timeout"
           exit 1
-          
-      - name: Run ZAP Baseline Scan
+  
+      - name: Run ZAP Baseline Scan (console only)
         run: |
-          mkdir -p zap-output
-          chmod -R 777 zap-output
-          
-          echo "Starting ZAP scan against: ${{ needs.deploy-staging.outputs.url }}"
+          echo "🚀 Starting ZAP scan against: ${{ needs.deploy-staging.outputs.url }}"
           set +e   # không dừng khi ZAP trả về code 2
-          docker run --rm -u 0 \
-            -v "$(pwd)/zap-output:/zap/wrk:rw" \
+          docker run --rm \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
             -t "${{ needs.deploy-staging.outputs.url }}" \
             -a \
             -m 10 \
-            -T 180 \
-            -r /zap/wrk/zap-report.html \
-            -w /zap/wrk/zap-report.txt \
-            -J /zap/wrk/zap-report.json \
-            -x /zap/wrk/zap-report.xml
+            -T 180 | tee zap-console.log
           echo "ZAP finished with exit code: $?"
+          echo "🔎 Filtering only ALERTS and FAILURES..."
+          grep -E "ALERT|FAIL" zap-console.log || true
           set -e
-          
-      - name: Upload ZAP artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: zap-report
-          path: zap-output/*
         
 # Deploy to Production (Heroku) - only on main branch
   deploy-production:
