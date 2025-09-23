@@ -42,7 +42,7 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
       - run: chmod +x ./mvnw
-
+  
       - name: Cache OWASP Dependency-Check data
         uses: actions/cache@v4
         with:
@@ -50,7 +50,7 @@ jobs:
           key: dependency-check-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
             dependency-check-${{ runner.os }}-
-
+  
       - name: Run Dependency Check
         env:
           OSSINDEX_USER: ${{ secrets.OSSINDEX_USER }}
@@ -58,7 +58,7 @@ jobs:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           ./mvnw org.owasp:dependency-check-maven:check \
-            -Dformats=JSON,HTML \
+            -Dformat=ALL \
             -Dnvd.api.enabled=true \
             -Dnvd.api.key=${NVD_API_KEY} \
             -Danalyzer.ossindex.enabled=true \
@@ -67,7 +67,7 @@ jobs:
             -Ddependency-check.skipTestScope=true \
             -Dnvd.failOnError=false \
             --fail-never
-
+  
       - uses: actions/upload-artifact@v4
         with:
           name: dependency-check-report
