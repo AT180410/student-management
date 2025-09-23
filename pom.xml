@@ -153,7 +153,7 @@
                     <!-- Tắt NVD -->
                     <nvdEnabled>false</nvdEnabled>
                     <!-- Dùng các analyzer khác -->
-                    <ossIndexEnabled>false</ossIndexEnabled>
+                    <ossIndexEnabled>true</ossIndexEnabled>
                     <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
                     <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
                 </configuration>
