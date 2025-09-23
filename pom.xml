@@ -154,8 +154,6 @@
                     <nvdEnabled>false</nvdEnabled>
                     <!-- Dùng các analyzer khác -->
                     <ossIndexEnabled>true</ossIndexEnabled>
-                    <ossIndexUsername>${env.OSS_INDEX_USERNAME}</ossIndexUsername>
-                    <ossIndexPassword>${env.OSS_INDEX_PASSWORD}</ossIndexPassword>
                     <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
                     <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
                 </configuration>
