@@ -75,7 +75,7 @@
         </dependency>
     </dependencies>
 
-    <!-- Override Tomcat to secure version -->
+<!--     Override Tomcat to secure version -->
     <dependencyManagement>
         <dependencies>
             <dependency>

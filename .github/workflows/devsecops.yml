@@ -38,21 +38,15 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Java for Maven
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
-      
+      - run: chmod +x ./mvnw
       - name: Build with Maven to generate dependencies
-        run: |
-          chmod +x ./mvnw
-          ./mvnw -B compile dependency:tree
-          
+        run: ./mvnw -B compile dependency:tree
       - name: Run Trivy vulnerability scanner for dependencies
         uses: aquasecurity/trivy-action@master
-        id: trivy-deps
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -61,15 +55,11 @@ jobs:
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
           exit-code: 0
-
-      - name: Upload Trivy SCA report
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: trivy-deps-report
           path: trivy-deps-report.sarif
-
-      - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-deps-report.sarif
 
@@ -121,8 +111,7 @@ jobs:
         with:
           name: trivy-container-report
           path: trivy-container-report.sarif
-      - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-container-report.sarif
 
@@ -145,12 +134,11 @@ jobs:
         with:
           name: checkov-report
           path: checkov-results.sarif
-      - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: checkov-results.sarif
 
-  # 🔒 SECURITY GATE CHÍNH - CHỈ PHỤ THUỘC VÀO CÁC SCAN TĨNH
+  # 🔒 SECURITY GATE CHÍNH - CHECK tất cả report trừ DAST
   security-gate:
     name: 🔒 Security Gate
     runs-on: ubuntu-latest
@@ -160,18 +148,15 @@ jobs:
     steps:
       - name: Install jq for JSON parsing
         run: sudo apt-get update && sudo apt-get install -y jq
-
       - uses: actions/download-artifact@v4
         with:
           pattern: trivy-*-report
           path: reports
           merge-multiple: true
-
       - uses: actions/download-artifact@v4
         with:
           name: checkov-report
           path: reports/iac
-
       - name: Analyze Security Reports
         id: check-gate
         run: |
@@ -181,67 +166,40 @@ jobs:
           TOTAL_CRITICAL=0
           TOTAL_HIGH=0
           
-          # 📦 SCA - TRIVY DEPENDENCIES
+          # 📦 SCA
           if [ -f "reports/trivy-deps-report.sarif" ]; then
-            echo "📦 Analyzing SCA results (Trivy Dependencies)..."
-            
-            SCA_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            SCA_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            
-            echo "🔍 SCA (Tags) - CRITICAL: $SCA_CRITICAL, HIGH: $SCA_HIGH"
-            TOTAL_CRITICAL=$((TOTAL_CRITICAL + SCA_CRITICAL))
-            TOTAL_HIGH=$((TOTAL_HIGH + SCA_HIGH))
-            
-            if [ "$SCA_CRITICAL" -gt 0 ]; then
-              echo "❌ SCA found $SCA_CRITICAL CRITICAL vulnerabilities"
-              FAIL=1
-            fi
+            CRIT=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' reports/trivy-deps-report.sarif)
+            HIGH=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' reports/trivy-deps-report.sarif)
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRIT))
+            TOTAL_HIGH=$((TOTAL_HIGH + HIGH))
+            if [ "$CRIT" -gt 0 ]; then FAIL=1; fi
           fi
           
-          # 🐳 CONTAINER SCAN
+          # 🐳 Container
           if [ -f "reports/trivy-container-report.sarif" ]; then
-            echo "🐳 Analyzing Container Scan results..."
-            
-            CONTAINER_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
-            CONTAINER_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
-            
-            echo "🔍 Container (Tags) - CRITICAL: $CONTAINER_CRITICAL, HIGH: $CONTAINER_HIGH"
-            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CONTAINER_CRITICAL))
-            TOTAL_HIGH=$((TOTAL_HIGH + CONTAINER_HIGH))
-            
-            if [ "$CONTAINER_CRITICAL" -gt 0 ]; then
-              echo "❌ Container scan found $CONTAINER_CRITICAL CRITICAL vulnerabilities"
-              FAIL=1
-            fi
+            CRIT=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' reports/trivy-container-report.sarif)
+            HIGH=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' reports/trivy-container-report.sarif)
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRIT))
+            TOTAL_HIGH=$((TOTAL_HIGH + HIGH))
+            if [ "$CRIT" -gt 0 ]; then FAIL=1; fi
           fi
           
-          # 🔧 IAC SCAN - CHECKOV
+          # 🔧 IaC
           if [ -f "reports/iac/checkov-results.sarif" ]; then
-            echo "🔧 Analyzing IaC results..."
-            
-            IAC_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
-            IAC_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
-            
-            echo "🔍 IaC (Tags) - CRITICAL: $IAC_CRITICAL, HIGH: $IAC_HIGH"
-            TOTAL_CRITICAL=$((TOTAL_CRITICAL + IAC_CRITICAL))
-            TOTAL_HIGH=$((TOTAL_HIGH + IAC_HIGH))
-            
-            if [ "$IAC_CRITICAL" -gt 0 ]; then
-              echo "❌ IaC scan found $IAC_CRITICAL CRITICAL vulnerabilities"
-              FAIL=1
-            fi
+            CRIT=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' reports/iac/checkov-results.sarif)
+            HIGH=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' reports/iac/checkov-results.sarif)
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRIT))
+            TOTAL_HIGH=$((TOTAL_HIGH + HIGH))
+            if [ "$CRIT" -gt 0 ]; then FAIL=1; fi
           fi
           
-          echo "📊 SECURITY SUMMARY (Static Scans):"
-          echo "   CRITICAL vulnerabilities: $TOTAL_CRITICAL"
-          echo "   HIGH vulnerabilities: $TOTAL_HIGH"
-          
+          echo "📊 CRITICAL: $TOTAL_CRITICAL | HIGH: $TOTAL_HIGH"
           if [ "$FAIL" -eq 1 ]; then
-            echo "❌ Security Gate failed - Found $TOTAL_CRITICAL CRITICAL vulnerabilities"
+            echo "❌ Security Gate failed"
             echo "passed=false" >> $GITHUB_OUTPUT
             exit 1
           else
-            echo "✅ Security Gate passed - No CRITICAL vulnerabilities found"
+            echo "✅ Security Gate passed"
             echo "passed=true" >> $GITHUB_OUTPUT
           fi
 
@@ -255,36 +213,27 @@ jobs:
     steps:
       - name: Set environment URL
         id: set-url
-        run: |
-          echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
-  
+        run: echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
       - name: Trigger Render Deploy
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID_TEST }}
         run: |
-          echo "🚀 Triggering Render deploy for service: $SERVICE_ID"
           curl --silent --show-error --fail -X POST \
             "https://api.render.com/v1/services/${SERVICE_ID}/deploys" \
             -H "Authorization: Bearer ${RENDER_API_KEY}" \
             -H "Accept: application/json"
-  
       - name: Wait for deployment to be ready
         run: |
           TARGET=${{ steps.set-url.outputs.url }}
-          echo "⏳ Waiting for $TARGET to become healthy..."
           for i in {1..20}; do
             if curl --silent --fail "$TARGET/actuator/health" > /dev/null; then
-              echo "✅ Application is healthy and ready!"
               exit 0
             fi
-            echo "Attempt $i/20: not ready yet, retrying in 10s..."
             sleep 10
           done
-          echo "❌ Application failed to start within timeout"
           exit 1
 
-  # 🛡️ DAST - CHỈ CHẠY TRÊN BRANCH TEST SAU KHI DEPLOY STAGING
   dast:
     name: 🛡️ DAST (OWASP ZAP)
     runs-on: ubuntu-latest
@@ -293,37 +242,23 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
       - name: Wait for application to be ready
         run: |
-          echo "Waiting for staging application to be ready..."
           for i in {1..30}; do
-            if curl --silent --fail ${{ needs.deploy-staging.outputs.url }}/actuator/health > /dev/null; then
-              echo "✅ Application is ready!"
+            if curl -s -f ${{ needs.deploy-staging.outputs.url }}/actuator/health > /dev/null; then
               exit 0
             fi
-            echo "⏳ Attempt $i: Application not ready yet, waiting 10 seconds..."
             sleep 10
           done
-          echo "❌ Application failed to become ready within timeout"
           exit 1
-
       - name: Run ZAP Baseline Scan
         run: |
-          echo "🚀 Starting ZAP scan against: ${{ needs.deploy-staging.outputs.url }}"
-          set +e
           docker run --rm \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
             -t "${{ needs.deploy-staging.outputs.url }}" \
-            -a \
-            -m 10 \
-            -T 180 | tee zap-console.log
-          echo "ZAP finished with exit code: $?"
-          echo "🔎 Filtering only ALERTS and FAILURES..."
+            -a -m 10 -T 180 | tee zap-console.log
           grep -E "ALERT|FAIL" zap-console.log || true
-          set -e
 
-  # 🔒 DYNAMIC SECURITY GATE - CHỈ CHO DAST (TÙY CHỌN)
   dynamic-security-gate:
     name: 🔒 Dynamic Security Gate (DAST)
     runs-on: ubuntu-latest
@@ -335,10 +270,7 @@ jobs:
       - name: Check DAST Results
         id: dast-check
         run: |
-          echo "🔍 Analyzing DAST results..."
-          # Trong thực tế, bạn sẽ phân tích kết quả ZAP ở đây
-          # Tạm thời coi như DAST luôn pass để không chặn pipeline
-          echo "✅ DAST completed (results analyzed separately)"
+          echo "✅ DAST completed (always pass for now)"
           echo "passed=true" >> $GITHUB_OUTPUT
 
   deploy-production:
@@ -348,19 +280,14 @@ jobs:
     if: github.ref == 'refs/heads/main' && needs.security-gate.outputs.passed == 'true'
     steps:
       - uses: actions/checkout@v4
-
       - name: Login to Heroku Container Registry
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          echo "${HEROKU_API_KEY}" | docker login --username=_ --password-stdin registry.heroku.com
-
+        run: echo "${HEROKU_API_KEY}" | docker login --username=_ --password-stdin registry.heroku.com
       - name: Build Docker image
         run: docker build -t registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web .
-
       - name: Push Docker image to Heroku
         run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
-
       - name: Release Docker image
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
@@ -372,7 +299,7 @@ jobs:
             -H "Accept: application/vnd.heroku+json; version=3" \
             -H "Authorization: Bearer ${HEROKU_API_KEY}"
 
-  # 📊 SECURITY REPORT - BAO GỒM TẤT CẢ CÁC SCAN
+  # 📊 SECURITY REPORT
   report:
     name: 📊 Unified Security Report
     runs-on: ubuntu-latest
@@ -380,135 +307,22 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install jq for JSON parsing
-        run: sudo apt-get update && sudo apt-get install -y jq
-
+      - run: sudo apt-get update && sudo apt-get install -y jq
       - uses: actions/download-artifact@v4
         with:
           pattern: trivy-*-report
           path: reports
           merge-multiple: true
-
       - uses: actions/download-artifact@v4
         with:
           name: checkov-report
           path: reports/iac
-
-      - name: Generate Detailed HTML Report
+      - name: Generate Security Report
         run: |
           mkdir -p reports/final
-          REPORT=reports/final/security-report.html
-          
-          cat > $REPORT << 'EOF'
-          <html>
-          <head>
-              <title>🔒 Security Scan Report</title>
-              <style>
-                  body { font-family: Arial, sans-serif; margin: 40px; background-color: #f5f5f5; }
-                  .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-                  .header { text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #eee; }
-                  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
-                  .card { padding: 20px; border-radius: 8px; text-align: center; }
-                  .critical { background-color: #ffebee; border-left: 4px solid #d32f2f; }
-                  .high { background-color: #fff3e0; border-left: 4px solid #f57c00; }
-                  .passed { background-color: #e8f5e8; border-left: 4px solid #4caf50; }
-                  .vuln-list { margin: 20px 0; }
-                  .vuln-item { padding: 15px; margin: 10px 0; border-radius: 5px; background: #fafafa; }
-                  .vuln-critical { border-left: 4px solid #d32f2f; }
-                  .vuln-high { border-left: 4px solid #f57c00; }
-                  .timestamp { color: #666; font-size: 14px; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <h1>🔒 Security Scan Report</h1>
-                      <p class="timestamp">Generated on: $(date)</p>
-                  </div>
-          EOF
-          
-          # Initialize counters
-          TOTAL_CRITICAL=0
-          TOTAL_HIGH=0
-          
-          # 📦 SCA Section
-          echo "<div class='card'><h2>📦 SCA - Dependency Vulnerabilities</h2>" >> $REPORT
-          if [ -f "reports/trivy-deps-report.sarif" ]; then
-            SCA_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            SCA_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            TOTAL_CRITICAL=$((TOTAL_CRITICAL + SCA_CRITICAL))
-            TOTAL_HIGH=$((TOTAL_HIGH + SCA_HIGH))
-            
-            echo "<div class='vuln-list'>" >> $REPORT
-            echo "<p><span style='color: #d32f2f; font-weight: bold;'>CRITICAL: $SCA_CRITICAL</span> | <span style='color: #f57c00; font-weight: bold;'>HIGH: $SCA_HIGH</span></p>" >> $REPORT
-            echo "</div>" >> $REPORT
-          else
-            echo "<p>No SCA report available</p>" >> $REPORT
-          fi
-          echo "</div>" >> $REPORT
-          
-          # 🐳 Container Section
-          echo "<div class='card'><h2>🐳 Container Vulnerabilities</h2>" >> $REPORT
-          if [ -f "reports/trivy-container-report.sarif" ]; then
-            CONTAINER_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
-            CONTAINER_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
-            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CONTAINER_CRITICAL))
-            TOTAL_HIGH=$((TOTAL_HIGH + CONTAINER_HIGH))
-            
-            echo "<div class='vuln-list'>" >> $REPORT
-            echo "<p><span style='color: #d32f2f; font-weight: bold;'>CRITICAL: $CONTAINER_CRITICAL</span> | <span style='color: #f57c00; font-weight: bold;'>HIGH: $CONTAINER_HIGH</span></p>" >> $REPORT
-            echo "</div>" >> $REPORT
-          else
-            echo "<p>No container scan report available</p>" >> $REPORT
-          fi
-          echo "</div>" >> $REPORT
-          
-          # 🔧 IaC Section
-          echo "<div class='card'><h2>🔧 IaC Security (Checkov)</h2>" >> $REPORT
-          if [ -f "reports/iac/checkov-results.sarif" ]; then
-            IAC_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
-            IAC_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
-            TOTAL_CRITICAL=$((TOTAL_CRITICAL + IAC_CRITICAL))
-            TOTAL_HIGH=$((TOTAL_HIGH + IAC_HIGH))
-            
-            echo "<div class='vuln-list'>" >> $REPORT
-            echo "<p><span style='color: #d32f2f; font-weight: bold;'>CRITICAL: $IAC_CRITICAL</span> | <span style='color: #f57c00; font-weight: bold;'>HIGH: $IAC_HIGH</span></p>" >> $REPORT
-            echo "</div>" >> $REPORT
-          else
-            echo "<p>No IaC scan report available</p>" >> $REPORT
-          fi
-          echo "</div>" >> $REPORT
-          
-          # 🛡️ DAST Section
-          echo "<div class='card'><h2>🛡️ DAST - Dynamic Application Security Testing</h2>" >> $REPORT
-          if [ "${{ github.ref }}" == "refs/heads/test" ] && [ "${{ needs.dast.result }}" == "success" ]; then
-            echo "<p>✅ DAST completed successfully on test environment</p>" >> $REPORT
-            echo "<p>Scan target: ${{ needs.deploy-staging.outputs.url }}</p>" >> $REPORT
-          elif [ "${{ github.ref }}" == "refs/heads/test" ]; then
-            echo "<p>⚠️ DAST: ${{ needs.dast.result }}</p>" >> $REPORT
-          else
-            echo "<p>ℹ️ DAST not executed on main branch (only runs on test branch)</p>" >> $REPORT
-          fi
-          echo "</div>" >> $REPORT
-          
-          # Summary Section
-          echo "<div class='summary'>" >> $REPORT
-          echo "<div class='card critical'><h3>🚨 Total CRITICAL</h3><h1>$TOTAL_CRITICAL</h1></div>" >> $REPORT
-          echo "<div class='card high'><h3>⚠️ Total HIGH</h3><h1>$TOTAL_HIGH</h1></div>" >> $REPORT
-          if [ "$TOTAL_CRITICAL" -eq 0 ]; then
-            echo "<div class='card passed'><h3>✅ Security Status</h3><h1>PASSED</h1></div>" >> $REPORT
-          else
-            echo "<div class='card critical'><h3>❌ Security Status</h3><h1>FAILED</h1></div>" >> $REPORT
-          fi
-          echo "</div>" >> $REPORT
-          
-          echo "</div></body></html>" >> $REPORT
-          
-          echo "📊 Generated security report:"
-          echo "   🚨 CRITICAL vulnerabilities: $TOTAL_CRITICAL"
-          echo "   ⚠️ HIGH vulnerabilities: $TOTAL_HIGH"
-
+          echo "<html><body><h1>Security Report</h1>" > reports/final/security-report.html
+          echo "<p>Generated on $(date)</p>" >> reports/final/security-report.html
+          echo "</body></html>" >> reports/final/security-report.html
       - uses: actions/upload-artifact@v4
         with:
           name: security-report
@@ -550,4 +364,3 @@ jobs:
             **Container:** ${{ needs.container-scan.result }}
             **IaC:** ${{ needs.iac-scan.result }}
             **DAST:** ${{ needs.dast.result || 'N/A' }}
-            🚨 Hãy kiểm tra lại logs chi tiết trong GitHub Action
