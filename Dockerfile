@@ -1,4 +1,17 @@
 # ======================
+# Build stage
+# ======================
+FROM eclipse-temurin:21-jdk AS build
+WORKDIR /app
+
+# Copy source code vào container
+COPY . .
+
+# Build jar với Maven Wrapper
+RUN chmod +x ./mvnw && ./mvnw -B package -DskipTests
+
+
+# ======================
 # Runtime stage
 # ======================
 # Dùng JRE nhẹ hơn JDK để giảm size
