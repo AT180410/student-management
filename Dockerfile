@@ -16,7 +16,7 @@ RUN mvn clean package -DskipTests
 FROM eclipse-temurin:21-jdk-jammy AS runtime
 WORKDIR /app
 
-# Update OS packages (vá CVE từ apt)
+# Update OS packages (vá CVE trong container)
 RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/*
