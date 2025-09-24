@@ -11,6 +11,18 @@ permissions:
   security-events: write
 
 jobs:
+  clear-cache:
+    name: 🧹 Clear Caches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clear Maven Cache
+        run: rm -rf ~/.m2/repository || true
+
+      - name: Clear Trivy Cache
+        run: trivy --reset || true
+
+      - name: Clear Docker Cache
+        run: docker builder prune -af || true
   build:
     name: Build & Test
     runs-on: ubuntu-latest
