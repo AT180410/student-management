@@ -1,51 +1,40 @@
 # ======================
 # Build stage
 # ======================
-FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
-
+FROM maven:3.9.6-eclipse-temurin-21 AS build
 WORKDIR /app
 
-# Copy pom.xml first for better caching
+# Copy pom.xml và tải dependencies để cache
 COPY pom.xml .
-# Download dependencies and plugins
-RUN mvn dependency:go-offline -B
+RUN mvn dependency:go-offline
 
+# Copy source code và build jar
 COPY src ./src
-# Build the application (skip tests for faster build, run them separately)
-RUN mvn clean package -DskipTests -B
+RUN mvn clean package -DskipTests
 
 # ======================
-# Runtime stage - USING JRE + SECURITY UPDATES
+# Runtime stage
 # ======================
-FROM eclipse-temurin:21-jre-jammy AS runtime
-
-# Install security updates and clean up
-RUN apt-get update && \
-    apt-get upgrade -y --no-install-recommends && \
-    apt-get install -y --no-install-recommends curl ca-certificates && \
-    rm -rf /var/lib/apt/lists/* && \
-    apt-get clean
-
-# Create app user and group
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
+FROM eclipse-temurin:21-jre   # JRE nhẹ hơn JDK
 WORKDIR /app
 
-# Copy the built application from build stage
-COPY --from=build --chown=appuser:appuser /app/target/*.jar app.jar
+# Cài curl cho healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Switch to non-root user
+# Copy jar từ build stage
+COPY --from=build /app/target/*.jar app.jar
+
+# Tạo user không phải root
+RUN useradd -ms /bin/bash appuser
 USER appuser
 
-# Expose application port
+# Expose cổng Spring Boot
 EXPOSE 8080
 
-# Health check
+# Thêm HEALTHCHECK để kiểm tra service
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -f http://localhost:8080/actuator/health || exit 1
 
-# Use exec form for better signal handling
-ENTRYPOINT ["java", "-jar", "app.jar"]
-
-# Add JVM options for security and performance
-CMD ["-Djava.security.egd=file:/dev/./urandom", "-XX:+UseContainerSupport", "-Dspring.profiles.active=prod"]
+# Chạy app
+ENTRYPOINT ["java","-jar","app.jar"]
