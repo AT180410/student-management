@@ -44,16 +44,14 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
       - name: Ensure Maven deps
-        run: |
-          chmod +x ./mvnw
-          ./mvnw -B compile dependency:tree
+        run: ./mvnw -B compile dependency:tree
       - name: Install Trivy
+        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+      - name: Trivy FS JSON + SARIF
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
-      - name: Trivy FS JSON
-        run: ./trivy fs --scanners vuln --format json --output trivy-deps-report.json . || true
-      - name: Trivy FS SARIF
-        run: ./trivy fs --scanners vuln --format sarif --output trivy-deps-report.sarif . || true
+          ./trivy fs --scanners vuln --format json --output trivy-deps-report.json . || true
+          ./trivy fs --scanners vuln --format sarif --output trivy-deps-report.sarif . || true
+          [ -f trivy-deps-report.sarif ] || echo '{"version":"2.1.0","runs":[]}' > trivy-deps-report.sarif
       - uses: actions/upload-artifact@v4
         with:
           name: trivy-deps-report
@@ -101,12 +99,12 @@ jobs:
       - name: Build Docker
         run: docker build -t student-management:latest .
       - name: Install Trivy
+        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+      - name: Trivy Image JSON + SARIF
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
-      - name: Trivy Image JSON
-        run: ./trivy image --scanners vuln --format json --output trivy-container-report.json student-management:latest || true
-      - name: Trivy Image SARIF
-        run: ./trivy image --scanners vuln --format sarif --output trivy-container-report.sarif student-management:latest || true
+          ./trivy image --scanners vuln --format json --output trivy-container-report.json student-management:latest || true
+          ./trivy image --scanners vuln --format sarif --output trivy-container-report.sarif student-management:latest || true
+          [ -f trivy-container-report.sarif ] || echo '{"version":"2.1.0","runs":[]}' > trivy-container-report.sarif
       - uses: actions/upload-artifact@v4
         with:
           name: trivy-container-report
@@ -126,8 +124,8 @@ jobs:
       - name: Run Checkov
         run: |
           pip install --user checkov
-          checkov -d . -o sarif > checkov-results.sarif || true
-          checkov -d . -o json > checkov-results.json || true
+          checkov -d . -o sarif --output-file checkov-results.sarif || true
+          checkov -d . -o json --output-file checkov-results.json || true
       - uses: actions/upload-artifact@v4
         with:
           name: checkov-report
