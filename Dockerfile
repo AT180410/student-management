@@ -18,8 +18,8 @@ RUN mvn clean package -DskipTests
 FROM eclipse-temurin:21-jdk
 WORKDIR /app
 
-# Cài curl bản an toàn (fix CVE)
-RUN apt-get update && apt-get install -y curl=8.9.1-1~deb12u1 && rm -rf /var/lib/apt/lists/*
+# Install latest curl (Ubuntu Noble repo luôn có bản patched)
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 # Copy jar từ build stage
 COPY --from=build /app/target/*.jar app.jar
