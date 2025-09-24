@@ -43,6 +43,8 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
+      - name: Ensure mvnw executable
+        run: chmod +x mvnw
       - name: Ensure Maven deps
         run: ./mvnw -B compile dependency:tree
       - name: Install Trivy
@@ -51,7 +53,9 @@ jobs:
         run: |
           ./trivy fs --scanners vuln --format json --output trivy-deps-report.json . || true
           ./trivy fs --scanners vuln --format sarif --output trivy-deps-report.sarif . || true
-          [ -f trivy-deps-report.sarif ] || echo '{"version":"2.1.0","runs":[]}' > trivy-deps-report.sarif
+          if ! [ -s trivy-deps-report.sarif ]; then
+            echo '{"version":"2.1.0","runs":[]}' > trivy-deps-report.sarif
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: trivy-deps-report
@@ -104,7 +108,10 @@ jobs:
         run: |
           ./trivy image --scanners vuln --format json --output trivy-container-report.json student-management:latest || true
           ./trivy image --scanners vuln --format sarif --output trivy-container-report.sarif student-management:latest || true
-          [ -f trivy-container-report.sarif ] || echo '{"version":"2.1.0","runs":[]}' > trivy-container-report.sarif
+          if ! [ -s trivy-container-report.sarif ]; then
+            echo '{"version":"2.1.0","runs":[]}' > trivy-container-report.sarif
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: trivy-container-report
