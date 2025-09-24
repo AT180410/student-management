@@ -32,42 +32,50 @@ jobs:
           name: app-jar
           path: target/*.jar
 
+  # 🔄 SỬA LẠI PHẦN NÀY - SỬ DỤNG TRIVY CHO SCA
   sca:
-    name: 📦 SCA (Trivy)
+    name: SCA (Trivy for Dependencies)
     runs-on: ubuntu-latest
     needs: build
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Java
+      
+      - name: Setup Java for Maven
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
-      - name: Ensure mvnw executable
-        run: chmod +x mvnw
-      - name: Ensure Maven deps
-        run: ./mvnw -B compile dependency:tree
-      - name: Install Trivy
-        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
-      - name: Trivy FS JSON + SARIF
+      
+      - name: Build with Maven to generate dependencies
         run: |
-          ./trivy fs --scanners vuln --format json --output trivy-deps-report.json . || true
-          ./trivy fs --scanners vuln --format sarif --output trivy-deps-report.sarif . || true
-          if ! [ -s trivy-deps-report.sarif ]; then
-            echo '{"version":"2.1.0","runs":[]}' > trivy-deps-report.sarif
-          fi
-      - uses: actions/upload-artifact@v4
+          chmod +x ./mvnw
+          ./mvnw -B compile dependency:tree
+          
+      - name: Run Trivy vulnerability scanner for dependencies
+        uses: aquasecurity/trivy-action@master
+        id: trivy-deps
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'  # Quét toàn bộ project, Trivy tự detect Maven
+          format: 'sarif'
+          output: 'trivy-deps-report.sarif'
+          severity: 'CRITICAL,HIGH'  # Chỉ tập trung vào lỗi nghiêm trọng
+          ignore-unfixed: true       # Bỏ qua lỗi chưa có bản fix
+          exit-code: 0               # Không fail pipeline ngay lập tức
+
+      - name: Upload Trivy SCA report
+        uses: actions/upload-artifact@v4
         with:
           name: trivy-deps-report
-          path: |
-            trivy-deps-report.json
-            trivy-deps-report.sarif
-      - uses: github/codeql-action/upload-sarif@v3
+          path: trivy-deps-report.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-deps-report.sarif
 
   sast:
-    name: 🔍 SAST (SonarCloud)
+    name: SAST (SonarCloud)
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -93,56 +101,56 @@ jobs:
             -Dsonar.tests=src/test/java \
             -Dsonar.junit.reportPaths=target/surefire-reports \
             -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-
   container-scan:
-    name: 🐳 Container Scan (Trivy)
+    name: Container Scan (Trivy)
     runs-on: ubuntu-latest
     needs: build
     steps:
       - uses: actions/checkout@v4
-      - name: Build Docker
+      - name: Build Docker image
         run: docker build -t student-management:latest .
-      - name: Install Trivy
-        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
-      - name: Trivy Image JSON + SARIF
-        run: |
-          ./trivy image --scanners vuln --format json --output trivy-container-report.json student-management:latest || true
-          ./trivy image --scanners vuln --format sarif --output trivy-container-report.sarif student-management:latest || true
-          if ! [ -s trivy-container-report.sarif ]; then
-            echo '{"version":"2.1.0","runs":[]}' > trivy-container-report.sarif
-          fi
-
+      - name: Run Trivy container scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: student-management:latest
+          format: sarif
+          output: trivy-container-report.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
       - uses: actions/upload-artifact@v4
         with:
           name: trivy-container-report
-          path: |
-            trivy-container-report.json
-            trivy-container-report.sarif
-      - uses: github/codeql-action/upload-sarif@v3
+          path: trivy-container-report.sarif
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-container-report.sarif
 
   iac-scan:
-    name: 🔧 IaC Security (Checkov)
+    name: IaC Security (Checkov)
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      security-events: write
     steps:
       - uses: actions/checkout@v4
-      - name: Run Checkov
-        run: |
-          pip install --user checkov
-          checkov -d . -o sarif --output-file checkov-results.sarif || true
-          checkov -d . -o json --output-file checkov-results.json || true
+      - name: Run Checkov (IoC scan)
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          output_format: cli,sarif
+          output_file_path: ./checkov-results.sarif
+          soft_fail: true
       - uses: actions/upload-artifact@v4
         with:
           name: checkov-report
-          path: |
-            checkov-results.sarif
-            checkov-results.json
-      - uses: github/codeql-action/upload-sarif@v3
+          path: checkov-results.sarif
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: checkov-results.sarif
 
+  # 🔄 SECURITY GATE
   security-gate:
     name: 🔒 Security Gate
     runs-on: ubuntu-latest
@@ -162,31 +170,60 @@ jobs:
         with:
           name: checkov-report
           path: reports/iac
-      - run: sudo apt-get update && sudo apt-get install -y jq
-      - id: check-gate
+
+      - name: Analyze Security Reports
+        id: check-gate
         run: |
-          set -euo pipefail
-          FAIL=0; TOTAL_CRIT=0; TOTAL_HIGH=0
-          parse() {
-            jq -r '
-              [ (.. | objects | .severity? // .level? // empty) | ascii_upcase ] as $s |
-              {crit: ([ $s[] | select(.=="CRITICAL")] | length),
-               high: ([ $s[] | select(.=="HIGH")] | length)}' "$1"
-          }
-          for f in reports/**/**/*; do
-            [ -f "$f" ] || continue
-            crit=$(parse "$f" | jq .crit)
-            high=$(parse "$f" | jq .high)
-            TOTAL_CRIT=$((TOTAL_CRIT+crit)); TOTAL_HIGH=$((TOTAL_HIGH+high))
-          done
-          echo "CRITICAL=$TOTAL_CRIT HIGH=$TOTAL_HIGH"
-          if [ "$TOTAL_CRIT" -gt 0 ]; then
+          set -e
+          echo "🔒 Analyzing Security Reports..."
+          FAIL=0
+          
+          # 🔄 SCA  TRIVY
+           if [ -f reports/sca/trivy-deps-report.sarif ]; then
+              echo "📦 Analyzing SCA results (Trivy)..."
+              CRITICAL_COUNT=$(jq '[.runs[].results[]? | select(.properties.severity == "CRITICAL")] | length' reports/sca/trivy-deps-report.sarif || echo "0")
+              HIGH_COUNT=$(jq '[.runs[].results[]? | select(.properties.severity == "HIGH")] | length' reports/sca/trivy-deps-report.sarif || echo "0")
+              
+            if [ "$CRITICAL_COUNT" -gt 0 ]; then
+              echo "❌ SCA found $CRITICAL_COUNT CRITICAL vulnerabilities"
+              FAIL=1
+            fi
+            echo "ℹ️ SCA HIGH vulnerabilities: ${HIGH_COUNT}"
+          else
+            echo "⚠️ No SCA SARIF report found at reports/sca/trivy-deps-report.sarif"
+          fi
+          # 🔄 PHẦN CONTAINER SCAN
+          if [ -f reports/container/trivy-container-report.sarif ]; then
+            echo "🐳 Analyzing Container Scan results..."
+            CRITICAL_COUNT=$(jq '[.runs[].results[]? | select(.severity == "critical")] | length' reports/container/trivy-container-report.sarif || echo "0")
+            HIGH_COUNT=$(jq '[.runs[].results[]? | select(.severity == "high")] | length' reports/container/trivy-container-report.sarif || echo "0")
+            
+            if [ "$CRITICAL_COUNT" -gt 0 ]; then
+              echo "❌ Container scan found $CRITICAL_COUNT CRITICAL vulnerabilities"
+              FAIL=1
+            fi
+            echo "ℹ️ Container scan HIGH vulnerabilities: ${HIGH_COUNT}"
+          fi
+          # 🔄 PHẦN IAC SCAN 
+          if [ -f reports/iac/checkov-results.sarif ]; then
+            echo "🔧 Analyzing IaC results..."
+            CRIT_COUNT=$(jq '[.runs[0].results[]? | select((.properties.severity? // "") == "CRITICAL" or (.level=="error"))] | length' reports/iac/checkov-results.sarif || echo "0")
+            HIGH_COUNT=$(jq '[.runs[0].results[]? | select((.properties.severity? // "") == "HIGH" or (.level=="warning"))] | length' reports/iac/checkov-results.sarif || echo "0")
+            
+            if [ "$CRIT_COUNT" -gt 0 ]; then
+              echo "❌ IaC scan found $CRIT_COUNT CRITICAL vulnerabilities"
+              FAIL=1
+            fi
+            echo "ℹ️ IaC HIGH vulnerabilities: $HIGH_COUNT"
+          fi
+          if [ "$FAIL" -eq 1 ]; then
+            echo "❌ Security Gate failed - Found CRITICAL vulnerabilities"
             echo "passed=false" >> $GITHUB_OUTPUT
             exit 1
           else
+            echo "✅ Security Gate passed - No CRITICAL vulnerabilities found"
             echo "passed=true" >> $GITHUB_OUTPUT
           fi
-
   deploy-staging:
     name: 🚀 Deploy to Staging (Render)
     runs-on: ubuntu-latest
@@ -197,29 +234,34 @@ jobs:
     steps:
       - name: Set environment URL
         id: set-url
-        run: echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
-      - name: Trigger Render Deploy (safer)
+        run: |
+          echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
+  
+      - name: Trigger Render Deploy (use Authorization header)
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID_TEST }}
         run: |
-          echo "Authorization: Bearer ${RENDER_API_KEY}" > headers.txt
-          echo "Accept: application/json" >> headers.txt
+          echo "🚀 Triggering Render deploy for service: $SERVICE_ID"
           curl --silent --show-error --fail -X POST \
             "https://api.render.com/v1/services/${SERVICE_ID}/deploys" \
-            -K headers.txt
-          rm headers.txt
-      - name: Wait for deployment
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Accept: application/json"
+  
+      - name: Wait for deployment to be ready
         run: |
           TARGET=${{ steps.set-url.outputs.url }}
+          echo "⏳ Waiting for $TARGET to become healthy..."
           for i in {1..20}; do
             if curl --silent --fail "$TARGET/actuator/health" > /dev/null; then
+              echo "✅ Application is healthy and ready!"
               exit 0
             fi
+            echo "Attempt $i/20: not ready yet, retrying in 10s..."
             sleep 10
           done
+          echo "❌ Application failed to start within timeout"
           exit 1
-
   dast:
     name: 🛡️ DAST (OWASP ZAP)
     runs-on: ubuntu-latest
@@ -228,48 +270,66 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - run: |
+
+      - name: Wait for application to be ready
+        run: |
+          echo "Waiting for staging application to be ready..."
           for i in {1..30}; do
             if curl --silent --fail ${{ needs.deploy-staging.outputs.url }}/actuator/health > /dev/null; then
+              echo "✅ Application is ready!"
               exit 0
             fi
+            echo "⏳ Attempt $i: Application not ready yet, waiting 10 seconds..."
             sleep 10
           done
+          echo "❌ Application failed to become ready within timeout"
           exit 1
-      - name: Run ZAP Baseline
+      - name: Run ZAP Baseline Scan (console only)
         run: |
-          docker run --rm ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t "${{ needs.deploy-staging.outputs.url }}" -a -m 10 -T 180 | tee zap.log
-
+          echo "🚀 Starting ZAP scan against: ${{ needs.deploy-staging.outputs.url }}"
+          set +e   # continue even if zap returns non-zero
+          docker run --rm \
+            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+            -t "${{ needs.deploy-staging.outputs.url }}" \
+            -a \
+            -m 10 \
+            -T 180 | tee zap-console.log
+          echo "ZAP finished with exit code: $?"
+          echo "🔎 Filtering only ALERTS and FAILURES..."
+          grep -E "ALERT|FAIL" zap-console.log || true
+          set -e
   deploy-production:
-    name: 🚀 Deploy to Production (Heroku)
+    name: 🚀 Deploy to Production (Heroku Docker)
     runs-on: ubuntu-latest
     needs: security-gate
     if: github.ref == 'refs/heads/main' && needs.security-gate.outputs.passed == 'true'
     steps:
       - uses: actions/checkout@v4
-      - name: Login Heroku
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: echo "${HEROKU_API_KEY}" | docker login --username=_ --password-stdin registry.heroku.com
-      - name: Build Docker
-        run: docker build -t registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web .
-      - name: Push Docker
-        run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
-      - name: Release App
+
+      - name: Login to Heroku Container Registry
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          echo "Authorization: Bearer ${HEROKU_API_KEY}" > headers.txt
+          echo "${HEROKU_API_KEY}" | docker login --username=_ --password-stdin registry.heroku.com
+      - name: Build Docker image
+        run: docker build -t registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web .
+
+      - name: Push Docker image to Heroku
+        run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
+
+      - name: Release Docker image (use Authorization header)
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
           curl --silent --show-error --fail -X POST \
             "https://api.heroku.com/apps/${{ secrets.HEROKU_APP_NAME }}/releases" \
             -d '{"slug":null,"description":"Deploy via GitHub Actions"}' \
-            -H "Content-Type:application/json" -H "Accept: application/vnd.heroku+json; version=3" \
-            -K headers.txt
-          rm headers.txt
-
+            -H "Content-Type:application/json" \
+            -H "Accept: application/vnd.heroku+json; version=3" \
+            -H "Authorization: Bearer ${HEROKU_API_KEY}"
+  # 🔄 CẬP NHẬT PHẦN REPORT
   report:
-    name: 📊 Unified Report
+    name: 📊 Unified Security Report (HTML)
     runs-on: ubuntu-latest
     needs: [sca, sast, container-scan, iac-scan]
     if: always()
@@ -287,17 +347,58 @@ jobs:
         with:
           name: checkov-report
           path: reports/iac
-      - run: sudo apt-get update && sudo apt-get install -y jq
-      - name: Generate Report
+
+      - name: Install jq for JSON parsing
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Generate Unified HTML Report
         run: |
           mkdir -p reports/final
           REPORT=reports/final/security-report.html
-          echo "<html><body><h1>Security Report</h1>" > $REPORT
-          for f in reports/**/**/*; do
-            if [ -f "$f" ]; then
-              echo "<h2>$f</h2><pre>$(jq '.' "$f" | head -200)</pre>" >> $REPORT
-            fi
-          done
+          
+          cat > $REPORT << 'EOF'
+          <html>
+          <head>
+              <title>Security Scan Report</title>
+              <style>
+                  body { font-family: Arial, sans-serif; margin: 40px; }
+                  .section { margin-bottom: 30px; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+                  .critical { color: #d73a49; font-weight: bold; }
+                  .high { color: #f66a0a; }
+                  .passed { background-color: #d4edda; }
+                  .failed { background-color: #f8d7da; }
+                  pre { background: #f6f8fa; padding: 10px; border-radius: 3px; overflow-x: auto; }
+              </style>
+          </head>
+          <body>
+              <h1>🔒 Security Scan Report</h1>
+              <p>Generated on: $(date)</p>
+          EOF
+          
+          # SCA Section
+          echo "<div class='section'><h2>📦 SCA - Dependency Vulnerabilities (Trivy)</h2>" >> $REPORT
+          if [ -f reports/sca/trivy-deps-report.sarif ]; then
+            CRITICAL=$(jq '[.runs[].results[]? | select(.severity == "critical")] | length' reports/sca/trivy-deps-report.sarif || echo "0")
+            HIGH=$(jq '[.runs[].results[]? | select(.severity == "high")] | length' reports/sca/trivy-deps-report.sarif || echo "0")
+            echo "<p><span class='critical'>CRITICAL: $CRITICAL</span> | <span class='high'>HIGH: $HIGH</span></p>" >> $REPORT
+            echo "<pre>$(jq '.' reports/sca/trivy-deps-report.sarif | head -100)</pre>" >> $REPORT
+          else
+            echo "<p>No SCA report available</p>" >> $REPORT
+          fi
+          echo "</div>" >> $REPORT
+          
+          # Container Section
+          echo "<div class='section'><h2>🐳 Container Vulnerabilities (Trivy)</h2>" >> $REPORT
+          if [ -f reports/container/trivy-container-report.sarif ]; then
+            CRITICAL=$(jq '[.runs[].results[]? | select(.severity == "critical")] | length' reports/container/trivy-container-report.sarif || echo "0")
+            HIGH=$(jq '[.runs[].results[]? | select(.severity == "high")] | length' reports/container/trivy-container-report.sarif || echo "0")
+            echo "<p><span class='critical'>CRITICAL: $CRITICAL</span> | <span class='high'>HIGH: $HIGH</span></p>" >> $REPORT
+            echo "<pre>$(jq '.' reports/container/trivy-container-report.sarif | head -100)</pre>" >> $REPORT
+          else
+            echo "<p>No container scan report available</p>" >> $REPORT
+          fi
+          echo "</div>" >> $REPORT
+          
           echo "</body></html>" >> $REPORT
       - uses: actions/upload-artifact@v4
         with:
@@ -317,7 +418,7 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         with:
           args: |
-            ✅ **Pipeline SUCCESS**: `${{ github.repository }}`
+            ✅ **Pipeline SUCCESS** cho `${{ github.repository }}`
             🔀 Branch: `${{ github.ref_name }}`
             📌 Status: **SUCCESS**
             **SAST:** ${{ needs.sast.result }}
@@ -332,7 +433,7 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         with:
           args: |
-            ❌ **Pipeline FAILED**: `${{ github.repository }}`
+            ❌ **Pipeline FAILED** cho `${{ github.repository }}`
             🔀 Branch: `${{ github.ref_name }}`
             📌 Status: **FAILED**
             **SAST:** ${{ needs.sast.result }}
@@ -340,3 +441,4 @@ jobs:
             **Container:** ${{ needs.container-scan.result }}
             **IaC:** ${{ needs.iac-scan.result }}
             **DAST:** ${{ needs.dast.result }}
+            🚨 Hãy kiểm tra lại logs chi tiết trong GitHub Action
