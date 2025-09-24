@@ -2,106 +2,163 @@ name: DevSecOps Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   pull_request:
-    branches:
-      - main
-
-permissions:
-  contents: read
-  security-events: write
-  actions: read
+    branches: [ "main" ]
 
 jobs:
   sca:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@0.20.0
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy for dependency scanning
+        uses: aquasecurity/trivy-action@0.20.0
         with:
           scan-type: fs
           format: sarif
           output: trivy-deps-report.sarif
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload SCA report
+        uses: actions/upload-artifact@v4
         with:
           name: trivy-deps-report
           path: trivy-deps-report.sarif
 
-  container_scan:
+  container-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-      - run: |
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build and push Docker image
+        run: |
           docker build -t ${{ secrets.DOCKER_USERNAME }}/student-management:latest .
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
           docker push ${{ secrets.DOCKER_USERNAME }}/student-management:latest
-      - uses: aquasecurity/trivy-action@0.20.0
+
+      - name: Run Trivy on Docker image
+        uses: aquasecurity/trivy-action@0.20.0
         with:
           image-ref: ${{ secrets.DOCKER_USERNAME }}/student-management:latest
           format: sarif
           output: trivy-image-report.sarif
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload container scan report
+        uses: actions/upload-artifact@v4
         with:
           name: trivy-image-report
           path: trivy-image-report.sarif
 
-  iac_scan:
+  iac-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: bridgecrewio/checkov-action@v12
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov for IaC scanning
+        uses: bridgecrewio/checkov-action@v12
         with:
           directory: .
           framework: terraform,kubernetes
           output_file_path: ./checkov-results.sarif
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload IaC scan report
+        uses: actions/upload-artifact@v4
         with:
-          name: checkov-results
+          name: checkov-report
           path: ./checkov-results.sarif
 
   security-gate:
     runs-on: ubuntu-latest
-    needs: [sca, container_scan, iac_scan]
+    needs: [sca, container-scan, iac-scan]
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all scan reports
+        uses: actions/download-artifact@v4
         with:
           path: reports
-      - run: |
-          set -e
+          merge-multiple: true
 
-          check_sarif() {
-            local file=$1
-            local crit=$(jq '[.runs[].results[]? 
-              | select(.ruleIndex as $ri | .runs[].tool.driver.rules[$ri].properties.tags[]? == "CRITICAL")] | length' $file)
-            local high=$(jq '[.runs[].results[]? 
-              | select(.ruleIndex as $ri | .runs[].tool.driver.rules[$ri].properties.tags[]? == "HIGH")] | length' $file)
-            echo "File: $file → CRITICAL=$crit, HIGH=$high"
-            if [ "$crit" -gt 0 ] || [ "$high" -gt 0 ]; then
-              echo "❌ Security gate failed on $file"
-              exit 1
-            fi
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run Security Gate
+        run: |
+          set -euo pipefail
+          echo "🔒 Checking vulnerabilities..."
+          FAIL=0
+          TOTAL_CRITICAL=0
+          TOTAL_HIGH=0
+
+          get_severities() {
+            local file="$1"
+            jq -r '
+              . as $sarif |
+              ($sarif.runs[0].tool.driver.rules // []) as $rules |
+              ($sarif.runs[0].results // [])[]?
+              | . as $res
+              | ($res.ruleIndex // null) as $ri
+              | ($res.ruleId // null) as $rid
+              | ($res.properties["security-severity"] // $res.properties.security_severity // null) as $score
+              | (if ($ri != null) then ($rules[$ri].properties.tags // [])
+                 elif ($rid != null) then ($rules[] | select(.id == $rid) | .properties.tags // [])
+                 else ($res.properties.tags // []) end) as $tags
+              | ($tags | map(tostring) | map(ascii_upcase)) as $tags_up
+              | (if ($tags_up | index("CRITICAL")) then "CRITICAL"
+                 elif ($tags_up | index("HIGH")) then "HIGH"
+                 elif ($tags_up | index("MEDIUM")) then "MEDIUM"
+                 elif ($tags_up | index("LOW")) then "LOW"
+                 elif ($score != null and ($score|tonumber >= 9)) then "CRITICAL"
+                 elif ($score != null and ($score|tonumber >= 7)) then "HIGH"
+                 elif ($score != null and ($score|tonumber >= 4)) then "MEDIUM"
+                 elif ($score != null) then "LOW"
+                 else "UNKNOWN" end)
+            ' "$file" 2>/dev/null || true
           }
 
-          check_sarif reports/trivy-deps-report/trivy-deps-report.sarif
-          check_sarif reports/trivy-image-report/trivy-image-report.sarif
-          check_sarif reports/checkov-results/checkov-results.sarif
+          find reports -type f -name '*.sarif' -print0 | while IFS= read -r -d '' file; do
+            echo "Processing $file"
+            SEVS=$(get_severities "$file")
+
+            CRIT=$(echo "$SEVS" | grep -c '^CRITICAL$' || true)
+            HIGH=$(echo "$SEVS" | grep -c '^HIGH$' || true)
+
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRIT))
+            TOTAL_HIGH=$((TOTAL_HIGH + HIGH))
+
+            if [ "$CRIT" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+              FAIL=1
+            fi
+          done
+
+          echo "SUMMARY: CRITICAL=$TOTAL_CRITICAL HIGH=$TOTAL_HIGH"
+          if [ "$FAIL" -eq 1 ]; then
+            echo "❌ Security gate failed"
+            exit 1
+          else
+            echo "✅ Security gate passed"
+          fi
 
   dast:
     runs-on: ubuntu-latest
     needs: [security-gate]
     steps:
-      - uses: actions/checkout@v4
-      - run: docker run -d -p 5000:5000 ${{ secrets.DOCKER_USERNAME }}/student-management:latest
-      - run: |
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run app container
+        run: docker run -d -p 5000:5000 ${{ secrets.DOCKER_USERNAME }}/student-management:latest
+
+      - name: Run ZAP baseline scan
+        run: |
           docker run --network host \
             -v $(pwd):/zap/wrk/:rw \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py -t http://localhost:5000 -J zap-report.json -r zap-report.html
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload ZAP report
+        uses: actions/upload-artifact@v4
         with:
           name: zap-report
           path: |
@@ -110,45 +167,86 @@ jobs:
 
   report:
     runs-on: ubuntu-latest
-    needs: [sca, container_scan, iac_scan, dast]
+    needs: [sca, container-scan, iac-scan, dast]
+    if: always()
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all reports
+        uses: actions/download-artifact@v4
         with:
           path: reports
-      - run: |
-          echo "# 📊 Security Report" > security-report.md
-          echo "" >> security-report.md
+          merge-multiple: true
 
-          parse_sarif() {
-            local file=$1
-            local name=$2
-            local crit=$(jq '[.runs[].results[]? 
-              | select(.ruleIndex as $ri | .runs[].tool.driver.rules[$ri].properties.tags[]? == "CRITICAL")] | length' $file)
-            local high=$(jq '[.runs[].results[]? 
-              | select(.ruleIndex as $ri | .runs[].tool.driver.rules[$ri].properties.tags[]? == "HIGH")] | length' $file)
-            echo "## $name" >> security-report.md
-            echo "- CRITICAL: $crit" >> security-report.md
-            echo "- HIGH: $high" >> security-report.md
-            echo "" >> security-report.md
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Generate unified HTML report
+        run: |
+          mkdir -p reports/final
+          REPORT=reports/final/security-report.html
+          cat > $REPORT <<'HTML_EOF'
+          <html><head><meta charset="utf-8"><title>Security Report</title>
+          <style>
+            body{font-family:Arial;padding:20px;background:#f5f5f5}
+            .container{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.08)}
+            .vuln-critical{border-left:4px solid #d32f2f;padding:10px;margin:8px 0}
+            .vuln-high{border-left:4px solid #f57c00;padding:10px;margin:8px 0}
+            .meta{color:#666;font-size:13px}
+          </style>
+          </head><body><div class="container">
+          <h1>🔒 Unified Security Report</h1>
+          <p class="meta">Generated on: $(date -u)</p>
+          HTML_EOF
+
+          compute_results_json() {
+            local file="$1"
+            jq -c '
+              . as $sarif |
+              ($sarif.runs[0].tool.driver.rules // []) as $rules |
+              ($sarif.runs[0].results // [])[]?
+              | . as $res
+              | ($res.ruleIndex // null) as $ri
+              | ($res.ruleId // null) as $rid
+              | ($res.properties["security-severity"] // $res.properties.security_severity // null) as $score
+              | (if ($ri != null) then ($rules[$ri].properties.tags // [])
+                 elif ($rid != null) then ($rules[] | select(.id == $rid) | .properties.tags // [])
+                 else ($res.properties.tags // []) end) as $tags
+              | ($tags | map(tostring) | map(ascii_upcase)) as $tags_up
+              | (if ($tags_up | index("CRITICAL")) then "CRITICAL"
+                 elif ($tags_up | index("HIGH")) then "HIGH"
+                 elif ($tags_up | index("MEDIUM")) then "MEDIUM"
+                 elif ($tags_up | index("LOW")) then "LOW"
+                 elif ($score != null and ($score|tonumber >= 9)) then "CRITICAL"
+                 elif ($score != null and ($score|tonumber >= 7)) then "HIGH"
+                 elif ($score != null and ($score|tonumber >= 4)) then "MEDIUM"
+                 elif ($score != null) then "LOW"
+                 else "UNKNOWN" end) as $sev
+              | {
+                  severity: $sev,
+                  ruleId: (.ruleId // ("ruleIndex:" + (.ruleIndex|tostring))),
+                  message: (.message.text // "")
+                }
+            ' "$file" 2>/dev/null || true
           }
 
-          parse_sarif reports/trivy-deps-report/trivy-deps-report.sarif "SCA (Dependencies)"
-          parse_sarif reports/trivy-image-report/trivy-image-report.sarif "Container Scan"
-          parse_sarif reports/checkov-results/checkov-results.sarif "IaC Security"
+          find reports -type f -name '*.sarif' -print0 | while IFS= read -r -d '' f; do
+            echo "<h2>File: ${f}</h2>" >> $REPORT
+            compute_results_json "$f" | jq -c 'select(.severity=="CRITICAL" or .severity=="HIGH")' | while read -r line; do
+              sev=$(echo "$line" | jq -r '.severity')
+              id=$(echo "$line" | jq -r '.ruleId')
+              msg=$(echo "$line" | jq -r '.message' | sed 's/</\&lt;/g;s/>/\&gt;/g')
+              if [ "$sev" = "CRITICAL" ]; then
+                echo "<div class='vuln-critical'><strong>CRITICAL</strong> — <em>${id}</em><div>${msg}</div></div>" >> $REPORT
+              else
+                echo "<div class='vuln-high'><strong>HIGH</strong> — <em>${id}</em><div>${msg}</div></div>" >> $REPORT
+              fi
+            done
+          done
 
-          echo "## DAST (OWASP ZAP)" >> security-report.md
-          if [ -f reports/zap-report/zap-report.json ]; then
-            crit=$(jq '[.site[].alerts[] | select(.risk == "High")] | length' reports/zap-report/zap-report.json)
-            high=$(jq '[.site[].alerts[] | select(.risk == "Medium")] | length' reports/zap-report/zap-report.json)
-            echo "- HIGH: $crit" >> security-report.md
-            echo "- MEDIUM: $high" >> security-report.md
-          else
-            echo "No ZAP report found." >> security-report.md
-          fi
+          echo "</div></body></html>" >> $REPORT
+          echo "Generated report at $REPORT"
 
-          cat security-report.md
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload final security report
+        uses: actions/upload-artifact@v4
         with:
           name: security-report
-          path: security-report.md
+          path: reports/final/security-report.html
