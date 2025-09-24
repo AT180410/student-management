@@ -1,7 +1,7 @@
 # ======================
 # Build stage
 # ======================
-FROM maven:3.9.6-eclipse-temurin-21 AS build
+FROM maven:3.9.9-eclipse-temurin-21 AS build
 WORKDIR /app
 
 COPY pom.xml .
@@ -13,16 +13,16 @@ RUN mvn clean package -DskipTests
 # ======================
 # Runtime stage
 # ======================
-FROM eclipse-temurin:21-jre-ubi9-minimal AS runtime
+FROM eclipse-temurin:21-jdk-jammy AS runtime
 WORKDIR /app
 
-# Ensure latest security patches
-RUN microdnf update -y && microdnf clean all
+# Update OS packages (vá CVE từ apt)
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy jar from build
 COPY --from=build /app/target/*.jar app.jar
 
-# Create non-root user
 RUN useradd -ms /bin/bash appuser
 USER appuser
 
