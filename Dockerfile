@@ -1,22 +1,26 @@
 # ======================
 # Build stage
 # ======================
-FROM maven:3.9.6-eclipse-temurin-21 AS build
+FROM eclipse-temurin:21-jdk AS build
 WORKDIR /app
 
-# Copy pom.xml và tải dependencies để cache
-COPY pom.xml .
-RUN mvn dependency:go-offline
+# Copy source code vào container
+COPY . .
 
-# Copy source code và build jar
-COPY src ./src
-RUN mvn clean package -DskipTests
+# Build jar với Maven Wrapper
+RUN chmod +x ./mvnw && ./mvnw -B package -DskipTests
+
 
 # ======================
 # Runtime stage
 # ======================
-FROM eclipse-temurin:21-jdk
+# Dùng JRE nhẹ hơn JDK để giảm size
+FROM eclipse-temurin:21-jre
 WORKDIR /app
+
+# Cài curl cho healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy jar từ build stage
 COPY --from=build /app/target/*.jar app.jar

@@ -9,6 +9,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.9</version> <!-- nâng lên latest patched -->
         <version>3.2.9</version> <!-- Latest patched -->
         <relativePath/>
     </parent>
@@ -43,6 +44,12 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-devtools</artifactId>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
@@ -69,7 +76,6 @@
         </dependency>
     </dependencies>
 
-    <!-- Force safe versions -->
     <dependencyManagement>
         <dependencies>
             <dependency>
@@ -106,6 +112,28 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+
+            <!-- Fix compile Java 17 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
+                    <release>${java.version}</release>
+                </configuration>
+            </plugin>
+
+            <!-- Sonar Plugin -->
+            <plugin>
+                <groupId>org.sonarsource.scanner.maven</groupId>
+                <artifactId>sonar-maven-plugin</artifactId>
+                <version>3.9.1.2184</version>
+            </plugin>
+
+            <!-- Surefire Plugin (JUnit) -->
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
@@ -135,7 +163,13 @@
                 <artifactId>dependency-check-maven</artifactId>
                 <version>12.1.0</version>
                 <configuration>
+                    <failBuildOnCVSS>9</failBuildOnCVSS> <!-- fail nếu có CRITICAL -->
+                    <ossIndexEnabled>true</ossIndexEnabled>
+                    <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
+                    <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
+
                     <failBuildOnCVSS>9</failBuildOnCVSS> <!-- fail if CRITICAL -->
+
                 </configuration>
             </plugin>
         </plugins>
