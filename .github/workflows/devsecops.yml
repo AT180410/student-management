@@ -292,7 +292,7 @@ jobs:
       - uses: Ilshidur/action-discord@master
         if: ${{ success() }}
         env: 
-        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }} 
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }} 
         with:
           args: |
             ✅ Pipeline SUCCESS for `${{ github.repository }}`
