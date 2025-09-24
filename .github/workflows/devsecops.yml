@@ -150,7 +150,7 @@ jobs:
         with:
           sarif_file: checkov-results.sarif
 
-  # 🔒 FIXED SECURITY GATE - CHỈ KHỚP "CRITICAL" VIẾT HOA
+   # 🔒 SECURITY GATE
   security-gate:
     name: 🔒 Security Gate
     runs-on: ubuntu-latest
@@ -172,6 +172,14 @@ jobs:
           name: checkov-report
           path: reports/iac
 
+      - name: Debug - List downloaded files
+        run: |
+          echo "📁 Listing downloaded files:"
+          find reports -type f -name "*.sarif" | while read file; do
+            echo "🔍 Found: $file"
+            echo "📊 File size: $(wc -c < "$file") bytes"
+          done
+
       - name: Analyze Security Reports
         id: check-gate
         run: |
@@ -181,12 +189,31 @@ jobs:
           TOTAL_CRITICAL=0
           TOTAL_HIGH=0
           
-          # 📦 SCA - TRIVY DEPENDENCIES - CHỈ KHỚP "CRITICAL" VIẾT HOA
+          # 📦 SCA - TRIVY DEPENDENCIES - CÁCH TIẾP CẬN ĐƠN GIẢN
           if [ -f "reports/trivy-deps-report.sarif" ]; then
             echo "📦 Analyzing SCA results (Trivy Dependencies)..."
-            # Chỉ tìm kiếm "CRITICAL" viết hoa
-            SCA_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.severity == "CRITICAL")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            SCA_HIGH=$(jq -r '[.runs[0].results[]? | select(.severity == "HIGH")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            
+            # Debug: Hiển thị cấu trúc file SARIF
+            echo "🔍 SARIF structure sample:"
+            jq '.runs[0].results[0]' "reports/trivy-deps-report.sarif" 2>/dev/null | head -20 || echo "Cannot parse SARIF file"
+            
+            # Đếm tất cả các results trước
+            TOTAL_RESULTS=$(jq -r '[.runs[0].results[]?] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            echo "📊 Total results in SCA report: $TOTAL_RESULTS"
+            
+            # Thử nhiều cách khác nhau để detect CRITICAL
+            SCA_CRITICAL1=$(jq -r '[.runs[0].results[]? | select(.severity == "CRITICAL")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            SCA_CRITICAL2=$(jq -r '[.runs[0].results[]? | select(.level == "error")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            SCA_CRITICAL3=$(jq -r '[.runs[0].results[]? | select(.properties.severity == "CRITICAL")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            
+            # Lấy giá trị cao nhất
+            SCA_CRITICAL=$((SCA_CRITICAL1 > SCA_CRITICAL2 ? SCA_CRITICAL1 : SCA_CRITICAL2))
+            SCA_CRITICAL=$((SCA_CRITICAL > SCA_CRITICAL3 ? SCA_CRITICAL : SCA_CRITICAL3))
+            
+            # Tương tự cho HIGH
+            SCA_HIGH1=$(jq -r '[.runs[0].results[]? | select(.severity == "HIGH")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            SCA_HIGH2=$(jq -r '[.runs[0].results[]? | select(.level == "warning")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            SCA_HIGH=$((SCA_HIGH1 > SCA_HIGH2 ? SCA_HIGH1 : SCA_HIGH2))
             
             echo "🔍 SCA - CRITICAL: $SCA_CRITICAL, HIGH: $SCA_HIGH"
             TOTAL_CRITICAL=$((TOTAL_CRITICAL + SCA_CRITICAL))
@@ -195,16 +222,30 @@ jobs:
             if [ "$SCA_CRITICAL" -gt 0 ]; then
               echo "❌ SCA found $SCA_CRITICAL CRITICAL vulnerabilities"
               FAIL=1
+              
+              # Hiển thị chi tiết các lỗ hổng CRITICAL
+              echo "📋 Critical vulnerabilities details:"
+              jq -r '.runs[0].results[]? | select(.severity == "CRITICAL" or .level == "error" or .properties.severity == "CRITICAL") | "   - \(.message.text)"' "reports/trivy-deps-report.sarif" 2>/dev/null | head -5 || true
             fi
           else
             echo "⚠️ No SCA report found: reports/trivy-deps-report.sarif"
+            ls -la reports/ || true
           fi
 
-          # 🐳 CONTAINER SCAN - CHỈ KHỚP "CRITICAL" VIẾT HOA
+          # 🐳 CONTAINER SCAN - CÁCH TIẾP CẬN TƯƠNG TỰ
           if [ -f "reports/trivy-container-report.sarif" ]; then
             echo "🐳 Analyzing Container Scan results..."
-            CONTAINER_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.severity == "CRITICAL")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
-            CONTAINER_HIGH=$(jq -r '[.runs[0].results[]? | select(.severity == "HIGH")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            
+            TOTAL_RESULTS=$(jq -r '[.runs[0].results[]?] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            echo "📊 Total results in Container report: $TOTAL_RESULTS"
+            
+            CONTAINER_CRITICAL1=$(jq -r '[.runs[0].results[]? | select(.severity == "CRITICAL")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            CONTAINER_CRITICAL2=$(jq -r '[.runs[0].results[]? | select(.level == "error")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            CONTAINER_CRITICAL=$((CONTAINER_CRITICAL1 > CONTAINER_CRITICAL2 ? CONTAINER_CRITICAL1 : CONTAINER_CRITICAL2))
+            
+            CONTAINER_HIGH1=$(jq -r '[.runs[0].results[]? | select(.severity == "HIGH")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            CONTAINER_HIGH2=$(jq -r '[.runs[0].results[]? | select(.level == "warning")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            CONTAINER_HIGH=$((CONTAINER_HIGH1 > CONTAINER_HIGH2 ? CONTAINER_HIGH1 : CONTAINER_HIGH2))
             
             echo "🔍 Container - CRITICAL: $CONTAINER_CRITICAL, HIGH: $CONTAINER_HIGH"
             TOTAL_CRITICAL=$((TOTAL_CRITICAL + CONTAINER_CRITICAL))
@@ -216,12 +257,15 @@ jobs:
             fi
           fi
 
-          # 🔧 IAC SCAN - CHỈ KHỚP "CRITICAL" VIẾT HOA
+          # 🔧 IAC SCAN - CHECKOV
           if [ -f "reports/iac/checkov-results.sarif" ]; then
             echo "🔧 Analyzing IaC results..."
-            # Checkov có thể dùng level hoặc severity
-            IAC_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.level == "error" or (.properties.severity? // "") == "CRITICAL")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
-            IAC_HIGH=$(jq -r '[.runs[0].results[]? | select(.level == "warning" or (.properties.severity? // "") == "HIGH")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            
+            TOTAL_RESULTS=$(jq -r '[.runs[0].results[]?] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            echo "📊 Total results in IaC report: $TOTAL_RESULTS"
+            
+            IAC_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.level == "error")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            IAC_HIGH=$(jq -r '[.runs[0].results[]? | select(.level == "warning")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
             
             echo "🔍 IaC - CRITICAL: $IAC_CRITICAL, HIGH: $IAC_HIGH"
             TOTAL_CRITICAL=$((TOTAL_CRITICAL + IAC_CRITICAL))
