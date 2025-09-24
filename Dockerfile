@@ -18,6 +18,9 @@ RUN mvn clean package -DskipTests
 FROM eclipse-temurin:21-jdk
 WORKDIR /app
 
+# Cài curl bản an toàn (fix CVE)
+RUN apt-get update && apt-get install -y curl=8.9.1-1~deb12u1 && rm -rf /var/lib/apt/lists/*
+
 # Copy jar từ build stage
 COPY --from=build /app/target/*.jar app.jar
 
@@ -28,9 +31,9 @@ USER appuser
 # Expose cổng Spring Boot
 EXPOSE 8080
 
-# Thêm HEALTHCHECK để kiểm tra service
+# HEALTHCHECK
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -f http://localhost:8080/actuator/health || exit 1
 
-# Chạy app
+# Run app
 ENTRYPOINT ["java","-jar","app.jar"]
