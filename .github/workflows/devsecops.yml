@@ -150,7 +150,7 @@ jobs:
         with:
           sarif_file: checkov-results.sarif
 
-   # 🔒 SECURITY GATE
+     # 🔒 FIXED SECURITY GATE - CHỈ KIỂM TRA TRONG TAGS
   security-gate:
     name: 🔒 Security Gate
     runs-on: ubuntu-latest
@@ -172,112 +172,72 @@ jobs:
           name: checkov-report
           path: reports/iac
 
-      - name: Debug - List downloaded files
-        run: |
-          echo "📁 Listing downloaded files:"
-          find reports -type f -name "*.sarif" | while read file; do
-            echo "🔍 Found: $file"
-            echo "📊 File size: $(wc -c < "$file") bytes"
-          done
-
       - name: Analyze Security Reports
         id: check-gate
         run: |
           set -e
-          echo "🔒 Analyzing Security Reports..."
+          echo "🔒 Analyzing Security Reports (Tags Only)..."
           FAIL=0
           TOTAL_CRITICAL=0
           TOTAL_HIGH=0
           
-          # 📦 SCA - TRIVY DEPENDENCIES - CÁCH TIẾP CẬN ĐƠN GIẢN
+          # 📦 SCA - TRIVY DEPENDENCIES - CHỈ KIỂM TRA TAGS
           if [ -f "reports/trivy-deps-report.sarif" ]; then
             echo "📦 Analyzing SCA results (Trivy Dependencies)..."
             
-            # Debug: Hiển thị cấu trúc file SARIF
-            echo "🔍 SARIF structure sample:"
-            jq '.runs[0].results[0]' "reports/trivy-deps-report.sarif" 2>/dev/null | head -20 || echo "Cannot parse SARIF file"
+            # Kiểm tra cấu trúc tags của file SARIF
+            echo "🔍 Checking SARIF tags structure..."
+            jq '.runs[0].results[0] | {message, properties}' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "Cannot parse SARIF structure"
             
-            # Đếm tất cả các results trước
-            TOTAL_RESULTS=$(jq -r '[.runs[0].results[]?] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            echo "📊 Total results in SCA report: $TOTAL_RESULTS"
+            # Đếm vulnerabilities dựa trên tags
+            SCA_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            SCA_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
             
-            # Thử nhiều cách khác nhau để detect CRITICAL
-            SCA_CRITICAL1=$(jq -r '[.runs[0].results[]? | select(.severity == "CRITICAL")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            SCA_CRITICAL2=$(jq -r '[.runs[0].results[]? | select(.level == "error")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            SCA_CRITICAL3=$(jq -r '[.runs[0].results[]? | select(.properties.severity == "CRITICAL")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            
-            # Lấy giá trị cao nhất
-            SCA_CRITICAL=$((SCA_CRITICAL1 > SCA_CRITICAL2 ? SCA_CRITICAL1 : SCA_CRITICAL2))
-            SCA_CRITICAL=$((SCA_CRITICAL > SCA_CRITICAL3 ? SCA_CRITICAL : SCA_CRITICAL3))
-            
-            # Tương tự cho HIGH
-            SCA_HIGH1=$(jq -r '[.runs[0].results[]? | select(.severity == "HIGH")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            SCA_HIGH2=$(jq -r '[.runs[0].results[]? | select(.level == "warning")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            SCA_HIGH=$((SCA_HIGH1 > SCA_HIGH2 ? SCA_HIGH1 : SCA_HIGH2))
-            
-            echo "🔍 SCA - CRITICAL: $SCA_CRITICAL, HIGH: $SCA_HIGH"
+            echo "🔍 SCA (Tags) - CRITICAL: $SCA_CRITICAL, HIGH: $SCA_HIGH"
             TOTAL_CRITICAL=$((TOTAL_CRITICAL + SCA_CRITICAL))
             TOTAL_HIGH=$((TOTAL_HIGH + SCA_HIGH))
             
             if [ "$SCA_CRITICAL" -gt 0 ]; then
-              echo "❌ SCA found $SCA_CRITICAL CRITICAL vulnerabilities"
+              echo "❌ SCA found $SCA_CRITICAL CRITICAL vulnerabilities (by tags)"
               FAIL=1
-              
-              # Hiển thị chi tiết các lỗ hổng CRITICAL
-              echo "📋 Critical vulnerabilities details:"
-              jq -r '.runs[0].results[]? | select(.severity == "CRITICAL" or .level == "error" or .properties.severity == "CRITICAL") | "   - \(.message.text)"' "reports/trivy-deps-report.sarif" 2>/dev/null | head -5 || true
             fi
-          else
-            echo "⚠️ No SCA report found: reports/trivy-deps-report.sarif"
-            ls -la reports/ || true
           fi
 
-          # 🐳 CONTAINER SCAN - CÁCH TIẾP CẬN TƯƠNG TỰ
+          # 🐳 CONTAINER SCAN - CHỈ KIỂM TRA TAGS
           if [ -f "reports/trivy-container-report.sarif" ]; then
             echo "🐳 Analyzing Container Scan results..."
             
-            TOTAL_RESULTS=$(jq -r '[.runs[0].results[]?] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
-            echo "📊 Total results in Container report: $TOTAL_RESULTS"
+            CONTAINER_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            CONTAINER_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
             
-            CONTAINER_CRITICAL1=$(jq -r '[.runs[0].results[]? | select(.severity == "CRITICAL")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
-            CONTAINER_CRITICAL2=$(jq -r '[.runs[0].results[]? | select(.level == "error")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
-            CONTAINER_CRITICAL=$((CONTAINER_CRITICAL1 > CONTAINER_CRITICAL2 ? CONTAINER_CRITICAL1 : CONTAINER_CRITICAL2))
-            
-            CONTAINER_HIGH1=$(jq -r '[.runs[0].results[]? | select(.severity == "HIGH")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
-            CONTAINER_HIGH2=$(jq -r '[.runs[0].results[]? | select(.level == "warning")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
-            CONTAINER_HIGH=$((CONTAINER_HIGH1 > CONTAINER_HIGH2 ? CONTAINER_HIGH1 : CONTAINER_HIGH2))
-            
-            echo "🔍 Container - CRITICAL: $CONTAINER_CRITICAL, HIGH: $CONTAINER_HIGH"
+            echo "🔍 Container (Tags) - CRITICAL: $CONTAINER_CRITICAL, HIGH: $CONTAINER_HIGH"
             TOTAL_CRITICAL=$((TOTAL_CRITICAL + CONTAINER_CRITICAL))
             TOTAL_HIGH=$((TOTAL_HIGH + CONTAINER_HIGH))
             
             if [ "$CONTAINER_CRITICAL" -gt 0 ]; then
-              echo "❌ Container scan found $CONTAINER_CRITICAL CRITICAL vulnerabilities"
+              echo "❌ Container scan found $CONTAINER_CRITICAL CRITICAL vulnerabilities (by tags)"
               FAIL=1
             fi
           fi
 
-          # 🔧 IAC SCAN - CHECKOV
+          # 🔧 IAC SCAN - CHECKOV (sử dụng tags)
           if [ -f "reports/iac/checkov-results.sarif" ]; then
             echo "🔧 Analyzing IaC results..."
             
-            TOTAL_RESULTS=$(jq -r '[.runs[0].results[]?] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
-            echo "📊 Total results in IaC report: $TOTAL_RESULTS"
+            IAC_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            IAC_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
             
-            IAC_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.level == "error")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
-            IAC_HIGH=$(jq -r '[.runs[0].results[]? | select(.level == "warning")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
-            
-            echo "🔍 IaC - CRITICAL: $IAC_CRITICAL, HIGH: $IAC_HIGH"
+            echo "🔍 IaC (Tags) - CRITICAL: $IAC_CRITICAL, HIGH: $IAC_HIGH"
             TOTAL_CRITICAL=$((TOTAL_CRITICAL + IAC_CRITICAL))
             TOTAL_HIGH=$((TOTAL_HIGH + IAC_HIGH))
             
             if [ "$IAC_CRITICAL" -gt 0 ]; then
-              echo "❌ IaC scan found $IAC_CRITICAL CRITICAL vulnerabilities"
+              echo "❌ IaC scan found $IAC_CRITICAL CRITICAL vulnerabilities (by tags)"
               FAIL=1
             fi
           fi
 
-          echo "📊 SECURITY SUMMARY:"
+          echo "📊 SECURITY SUMMARY (Tags Analysis):"
           echo "   CRITICAL vulnerabilities: $TOTAL_CRITICAL"
           echo "   HIGH vulnerabilities: $TOTAL_HIGH"
           
@@ -289,7 +249,7 @@ jobs:
             echo "✅ Security Gate passed - No CRITICAL vulnerabilities found"
             echo "passed=true" >> $GITHUB_OUTPUT
           fi
-
+          
   deploy-staging:
     name: 🚀 Deploy to Staging (Render)
     runs-on: ubuntu-latest
@@ -396,9 +356,9 @@ jobs:
             -H "Accept: application/vnd.heroku+json; version=3" \
             -H "Authorization: Bearer ${HEROKU_API_KEY}"
 
-  # 📊 FIXED UNIFIED SECURITY REPORT - CHỈ KHỚP "CRITICAL" VIẾT HOA
+  # 📊 FIXED REPORT - CHỈ KIỂM TRA TRONG TAGS
   report:
-    name: 📊 Unified Security Report (HTML)
+    name: 📊 Unified Security Report (HTML) - Tags Analysis
     runs-on: ubuntu-latest
     needs: [sca, sast, container-scan, iac-scan]
     if: always()
@@ -419,7 +379,7 @@ jobs:
           name: checkov-report
           path: reports/iac
 
-      - name: Generate Detailed HTML Report
+      - name: Generate Detailed HTML Report (Tags Based)
         run: |
           mkdir -p reports/final
           REPORT=reports/final/security-report.html
@@ -427,7 +387,7 @@ jobs:
           cat > $REPORT << 'EOF'
           <html>
           <head>
-              <title>🔒 Security Scan Report</title>
+              <title>🔒 Security Scan Report (Tags Analysis)</title>
               <style>
                   body { font-family: Arial, sans-serif; margin: 40px; background-color: #f5f5f5; }
                   .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
@@ -441,15 +401,16 @@ jobs:
                   .vuln-item { padding: 15px; margin: 10px 0; border-radius: 5px; background: #fafafa; }
                   .vuln-critical { border-left: 4px solid #d32f2f; }
                   .vuln-high { border-left: 4px solid #f57c00; }
-                  pre { background: #f6f8fa; padding: 15px; border-radius: 5px; overflow-x: auto; font-size: 12px; }
                   .timestamp { color: #666; font-size: 14px; }
+                  .tag-info { font-size: 12px; color: #666; margin-top: 5px; }
               </style>
           </head>
           <body>
               <div class="container">
                   <div class="header">
-                      <h1>🔒 Security Scan Report</h1>
+                      <h1>🔒 Security Scan Report (Tags Analysis)</h1>
                       <p class="timestamp">Generated on: $(date)</p>
+                      <p class="tag-info">Analysis based on vulnerability tags</p>
                   </div>
           EOF
           
@@ -457,26 +418,26 @@ jobs:
           TOTAL_CRITICAL=0
           TOTAL_HIGH=0
           
-          # 📦 SCA Section - CHỈ KHỚP "CRITICAL" VIẾT HOA
+          # 📦 SCA Section - DỰA TRÊN TAGS
           echo "<div class='card'><h2>📦 SCA - Dependency Vulnerabilities</h2>" >> $REPORT
           if [ -f "reports/trivy-deps-report.sarif" ]; then
-            SCA_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.severity == "CRITICAL")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
-            SCA_HIGH=$(jq -r '[.runs[0].results[]? | select(.severity == "HIGH")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            SCA_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            SCA_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
             TOTAL_CRITICAL=$((TOTAL_CRITICAL + SCA_CRITICAL))
             TOTAL_HIGH=$((TOTAL_HIGH + SCA_HIGH))
             
             echo "<div class='vuln-list'>" >> $REPORT
             echo "<p><span style='color: #d32f2f; font-weight: bold;'>CRITICAL: $SCA_CRITICAL</span> | <span style='color: #f57c00; font-weight: bold;'>HIGH: $SCA_HIGH</span></p>" >> $REPORT
             
-            # Extract CRITICAL vulnerabilities details - CHỈ KHỚP "CRITICAL" VIẾT HOA
-            jq -r '.runs[0].results[]? | select(.severity == "CRITICAL") | "\(.message.text) - \(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine)"' "reports/trivy-deps-report.sarif" 2>/dev/null | while read -r vuln; do
+            # Hiển thị các vulnerability có tag CRITICAL
+            jq -r '.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL")) | "\(.message.text) | Tags: \([.properties.tags[]?] | join(", "))"' "reports/trivy-deps-report.sarif" 2>/dev/null | while read -r vuln; do
               if [ -n "$vuln" ]; then
                 echo "<div class='vuln-item vuln-critical'>🚨 CRITICAL: $vuln</div>" >> $REPORT
               fi
             done
             
-            # Extract HIGH vulnerabilities details - CHỈ KHỚP "HIGH" VIẾT HOA
-            jq -r '.runs[0].results[]? | select(.severity == "HIGH") | "\(.message.text) - \(.locations[0].physicalLocation.artifactLocation.uri)"' "reports/trivy-deps-report.sarif" 2>/dev/null | head -10 | while read -r vuln; do
+            # Hiển thị các vulnerability có tag HIGH
+            jq -r '.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH")) | "\(.message.text)"' "reports/trivy-deps-report.sarif" 2>/dev/null | head -3 | while read -r vuln; do
               if [ -n "$vuln" ]; then
                 echo "<div class='vuln-item vuln-high'>⚠️ HIGH: $vuln</div>" >> $REPORT
               fi
@@ -488,24 +449,24 @@ jobs:
           fi
           echo "</div>" >> $REPORT
           
-          # 🐳 Container Section - CHỈ KHỚP "CRITICAL" VIẾT HOA
+          # 🐳 Container Section - DỰA TRÊN TAGS
           echo "<div class='card'><h2>🐳 Container Vulnerabilities</h2>" >> $REPORT
           if [ -f "reports/trivy-container-report.sarif" ]; then
-            CONTAINER_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.severity == "CRITICAL")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
-            CONTAINER_HIGH=$(jq -r '[.runs[0].results[]? | select(.severity == "HIGH")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            CONTAINER_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            CONTAINER_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
             TOTAL_CRITICAL=$((TOTAL_CRITICAL + CONTAINER_CRITICAL))
             TOTAL_HIGH=$((TOTAL_HIGH + CONTAINER_HIGH))
             
             echo "<div class='vuln-list'>" >> $REPORT
             echo "<p><span style='color: #d32f2f; font-weight: bold;'>CRITICAL: $CONTAINER_CRITICAL</span> | <span style='color: #f57c00; font-weight: bold;'>HIGH: $CONTAINER_HIGH</span></p>" >> $REPORT
             
-            jq -r '.runs[0].results[]? | select(.severity == "CRITICAL") | "\(.message.text) - \(.locations[0].physicalLocation.artifactLocation.uri)"' "reports/trivy-container-report.sarif" 2>/dev/null | while read -r vuln; do
+            jq -r '.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL")) | "\(.message.text)"' "reports/trivy-container-report.sarif" 2>/dev/null | while read -r vuln; do
               if [ -n "$vuln" ]; then
                 echo "<div class='vuln-item vuln-critical'>🚨 CRITICAL: $vuln</div>" >> $REPORT
               fi
             done
             
-            jq -r '.runs[0].results[]? | select(.severity == "HIGH") | "\(.message.text)"' "reports/trivy-container-report.sarif" 2>/dev/null | head -5 | while read -r vuln; do
+            jq -r '.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH")) | "\(.message.text)"' "reports/trivy-container-report.sarif" 2>/dev/null | head -3 | while read -r vuln; do
               if [ -n "$vuln" ]; then
                 echo "<div class='vuln-item vuln-high'>⚠️ HIGH: $vuln</div>" >> $REPORT
               fi
@@ -517,24 +478,24 @@ jobs:
           fi
           echo "</div>" >> $REPORT
           
-          # 🔧 IaC Section - CHỈ KHỚP "CRITICAL" VIẾT HOA
+          # 🔧 IaC Section - DỰA TRÊN TAGS
           echo "<div class='card'><h2>🔧 IaC Security (Checkov)</h2>" >> $REPORT
           if [ -f "reports/iac/checkov-results.sarif" ]; then
-            IAC_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.level == "error" or (.properties.severity? // "") == "CRITICAL")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
-            IAC_HIGH=$(jq -r '[.runs[0].results[]? | select(.level == "warning" or (.properties.severity? // "") == "HIGH")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            IAC_CRITICAL=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            IAC_HIGH=$(jq -r '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
             TOTAL_CRITICAL=$((TOTAL_CRITICAL + IAC_CRITICAL))
             TOTAL_HIGH=$((TOTAL_HIGH + IAC_HIGH))
             
             echo "<div class='vuln-list'>" >> $REPORT
             echo "<p><span style='color: #d32f2f; font-weight: bold;'>CRITICAL: $IAC_CRITICAL</span> | <span style='color: #f57c00; font-weight: bold;'>HIGH: $IAC_HIGH</span></p>" >> $REPORT
             
-            jq -r '.runs[0].results[]? | select(.level == "error" or (.properties.severity? // "") == "CRITICAL") | "\(.message.text) - \(.locations[0].physicalLocation.artifactLocation.uri)"' "reports/iac/checkov-results.sarif" 2>/dev/null | while read -r vuln; do
+            jq -r '.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL")) | "\(.message.text)"' "reports/iac/checkov-results.sarif" 2>/dev/null | while read -r vuln; do
               if [ -n "$vuln" ]; then
                 echo "<div class='vuln-item vuln-critical'>🚨 CRITICAL: $vuln</div>" >> $REPORT
               fi
             done
             
-            jq -r '.runs[0].results[]? | select(.level == "warning" or (.properties.severity? // "") == "HIGH") | "\(.message.text)"' "reports/iac/checkov-results.sarif" 2>/dev/null | head -5 | while read -r vuln; do
+            jq -r '.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH")) | "\(.message.text)"' "reports/iac/checkov-results.sarif" 2>/dev/null | head -3 | while read -r vuln; do
               if [ -n "$vuln" ]; then
                 echo "<div class='vuln-item vuln-high'>⚠️ HIGH: $vuln</div>" >> $REPORT
               fi
@@ -559,7 +520,7 @@ jobs:
           
           echo "</div></body></html>" >> $REPORT
           
-          echo "📊 Generated security report with:"
+          echo "📊 Generated security report based on tags:"
           echo "   🚨 CRITICAL vulnerabilities: $TOTAL_CRITICAL"
           echo "   ⚠️ HIGH vulnerabilities: $TOTAL_HIGH"
 
