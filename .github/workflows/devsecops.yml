@@ -151,7 +151,7 @@ jobs:
         with:
           sarif_file: checkov-results.sarif
 
-  # 🔄 CẬP NHẬT SECURITY GATE CHO TRIVY SCA
+  # 🔄 SECURITY GATE
   security-gate:
     name: 🔒 Security Gate
     runs-on: ubuntu-latest
@@ -179,12 +179,12 @@ jobs:
           echo "🔒 Analyzing Security Reports..."
           FAIL=0
           
-          # 🔄 PHẦN SCA MỚI - SỬ DỤNG TRIVY
-          if [ -f reports/sca/trivy-deps-report.sarif ]; then
-            echo "📦 Analyzing SCA results (Trivy)..."
-            CRITICAL_COUNT=$(jq '[.runs[].results[]? | select(.severity == "critical")] | length' reports/sca/trivy-deps-report.sarif || echo "0")
-            HIGH_COUNT=$(jq '[.runs[].results[]? | select(.severity == "high")] | length' reports/sca/trivy-deps-report.sarif || echo "0")
-            
+          # 🔄 SCA  TRIVY
+           if [ -f reports/sca/trivy-deps-report.sarif ]; then
+              echo "📦 Analyzing SCA results (Trivy)..."
+              CRITICAL_COUNT=$(jq '[.runs[].results[]? | select(.properties.severity == "CRITICAL")] | length' reports/sca/trivy-deps-report.sarif || echo "0")
+              HIGH_COUNT=$(jq '[.runs[].results[]? | select(.properties.severity == "HIGH")] | length' reports/sca/trivy-deps-report.sarif || echo "0")
+              
             if [ "$CRITICAL_COUNT" -gt 0 ]; then
               echo "❌ SCA found $CRITICAL_COUNT CRITICAL vulnerabilities"
               FAIL=1
@@ -194,7 +194,7 @@ jobs:
             echo "⚠️ No SCA SARIF report found at reports/sca/trivy-deps-report.sarif"
           fi
 
-          # 🔄 PHẦN CONTAINER SCAN (GIỮ NGUYÊN)
+          # 🔄 PHẦN CONTAINER SCAN
           if [ -f reports/container/trivy-container-report.sarif ]; then
             echo "🐳 Analyzing Container Scan results..."
             CRITICAL_COUNT=$(jq '[.runs[].results[]? | select(.severity == "critical")] | length' reports/container/trivy-container-report.sarif || echo "0")
@@ -207,7 +207,7 @@ jobs:
             echo "ℹ️ Container scan HIGH vulnerabilities: ${HIGH_COUNT}"
           fi
 
-          # 🔄 PHẦN IAC SCAN (GIỮ NGUYÊN)
+          # 🔄 PHẦN IAC SCAN 
           if [ -f reports/iac/checkov-results.sarif ]; then
             echo "🔧 Analyzing IaC results..."
             CRIT_COUNT=$(jq '[.runs[0].results[]? | select((.properties.severity? // "") == "CRITICAL" or (.level=="error"))] | length' reports/iac/checkov-results.sarif || echo "0")
