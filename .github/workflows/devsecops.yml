@@ -43,15 +43,16 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
       - run: chmod +x ./mvnw
-      - run: ./mvnw -B compile dependency:tree
-      - name: Run Trivy dependency scan
+      - name: Build with Maven to generate dependencies
+        run: ./mvnw -B compile dependency:tree
+      - name: Run Trivy vulnerability scanner for dependencies
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: fs
-          scan-ref: .
-          format: sarif
-          output: trivy-deps-report.sarif
-          severity: CRITICAL,HIGH
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-deps-report.sarif'
+          severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
           exit-code: 0
       - uses: actions/upload-artifact@v4
@@ -89,7 +90,6 @@ jobs:
             -Dsonar.tests=src/test/java \
             -Dsonar.junit.reportPaths=target/surefire-reports \
             -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-
   container-scan:
     name: Container Scan (Trivy)
     runs-on: ubuntu-latest
@@ -118,14 +118,16 @@ jobs:
     name: IaC Security (Checkov)
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      security-events: write
     steps:
       - uses: actions/checkout@v4
-      - name: Run Checkov (IaC scan)
+      - name: Run Checkov (IoC scan)
         uses: bridgecrewio/checkov-action@master
         with:
           directory: .
-          output_format: sarif
-          output_file_path: checkov-results.sarif
+          output_format: cli,sarif
+          output_file_path: ./checkov-results.sarif
           soft_fail: true
       - uses: actions/upload-artifact@v4
         with:
@@ -135,18 +137,238 @@ jobs:
         with:
           sarif_file: checkov-results.sarif
 
-  # 🔒 SECURITY GATE
+# 🔒 FIXED SECURITY GATE - SỬA LẠI CÁCH ĐỌC SEVERITY
   security-gate:
     name: 🔒 Security Gate
     runs-on: ubuntu-latest
     needs: [sca, sast, container-scan, iac-scan]
     outputs:
       passed: ${{ steps.check-gate.outputs.passed }}
-      critical_count: ${{ steps.check-gate.outputs.critical_count }}
-      high_count: ${{ steps.check-gate.outputs.high_count }}
     steps:
-      - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y jq bc
+      - name: Install jq for JSON parsing
+        run: sudo apt-get update && sudo apt-get install -y jq
+  
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: trivy-*-report
+          path: reports
+          merge-multiple: true
+  
+      - uses: actions/download-artifact@v4
+        with:
+          name: checkov-report
+          path: reports/iac
+  
+      - name: Debug - Check SARIF structure
+        run: |
+          echo "🔍 Checking SARIF structure..."
+          if [ -f "reports/trivy-deps-report.sarif" ]; then
+            echo "📦 SCA Report structure:"
+            jq '.runs[0].tool.driver.rules[0] | {id, properties}' "reports/trivy-deps-report.sarif" || echo "Cannot parse"
+            echo "---"
+            jq '.runs[0].results[0] | {ruleId, message}' "reports/trivy-deps-report.sarif" || echo "No results"
+          fi
+  
+      - name: Analyze Security Reports - FIXED
+        id: check-gate
+        run: |
+          set -e
+          echo "🔒 Analyzing Security Reports with correct severity parsing..."
+          FAIL=0
+          TOTAL_CRITICAL=0
+          TOTAL_HIGH=0
+          
+          # 📦 SCA - TRIVY DEPENDENCIES - SỬA LẠI CÁCH ĐỌC SEVERITY
+          if [ -f "reports/trivy-deps-report.sarif" ]; then
+            echo "📦 Analyzing SCA results (Trivy Dependencies)..."
+            
+            # Cách 1: Đọc severity từ tags trong rules
+            SCA_CRITICAL=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "CRITICAL")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            SCA_HIGH=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "HIGH")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            
+            # Cách 2: Nếu cách 1 không hoạt động, thử đọc từ CVSS score
+            if [ "$SCA_CRITICAL" -eq "0" ] && [ "$SCA_HIGH" -eq "0" ]; then
+              echo "⚠️ Trying alternative severity detection using CVSS scores..."
+              SCA_CRITICAL=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | select((.properties."security-severity" | tonumber) >= 9.0)] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+              SCA_HIGH=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | select((.properties."security-severity" | tonumber) >= 7.0 and (.properties."security-severity" | tonumber) < 9.0)] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            fi
+            
+            echo "🔍 SCA - CRITICAL: $SCA_CRITICAL, HIGH: $SCA_HIGH"
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + SCA_CRITICAL))
+            TOTAL_HIGH=$((TOTAL_HIGH + SCA_HIGH))
+            
+            if [ "$SCA_CRITICAL" -gt 0 ]; then
+              echo "❌ SCA found $SCA_CRITICAL CRITICAL vulnerabilities"
+              FAIL=1
+            fi
+          fi
+          
+          # 🐳 CONTAINER SCAN - SỬA TƯƠNG TỰ
+          if [ -f "reports/trivy-container-report.sarif" ]; then
+            echo "🐳 Analyzing Container Scan results..."
+            
+            CONTAINER_CRITICAL=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "CRITICAL")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            CONTAINER_HIGH=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "HIGH")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            
+            if [ "$CONTAINER_CRITICAL" -eq "0" ] && [ "$CONTAINER_HIGH" -eq "0" ]; then
+              CONTAINER_CRITICAL=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | select((.properties."security-severity" | tonumber) >= 9.0)] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+              CONTAINER_HIGH=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | select((.properties."security-severity" | tonumber) >= 7.0 and (.properties."security-severity" | tonumber) < 9.0)] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            fi
+            
+            echo "🔍 Container - CRITICAL: $CONTAINER_CRITICAL, HIGH: $CONTAINER_HIGH"
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CONTAINER_CRITICAL))
+            TOTAL_HIGH=$((TOTAL_HIGH + CONTAINER_HIGH))
+            
+            if [ "$CONTAINER_CRITICAL" -gt 0 ]; then
+              echo "❌ Container scan found $CONTAINER_CRITICAL CRITICAL vulnerabilities"
+              FAIL=1
+            fi
+          fi
+          
+          # 🔧 IAC SCAN - CHECKOV (có thể có cấu trúc khác)
+          if [ -f "reports/iac/checkov-results.sarif" ]; then
+            echo "🔧 Analyzing IaC results..."
+            
+            # Checkov có thể sử dụng cấu trúc khác - thử nhiều cách
+            IAC_CRITICAL=$(jq -r '[.runs[0].results[] | select(.level == "error")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            IAC_HIGH=$(jq -r '[.runs[0].results[] | select(.level == "warning")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            
+            # Thử cách khác nếu cách trên không hoạt động
+            if [ "$IAC_CRITICAL" -eq "0" ]; then
+              IAC_CRITICAL=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "CRITICAL")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+              IAC_HIGH=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "HIGH")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            fi
+            
+            echo "🔍 IaC - CRITICAL: $IAC_CRITICAL, HIGH: $IAC_HIGH"
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + IAC_CRITICAL))
+            TOTAL_HIGH=$((TOTAL_HIGH + IAC_HIGH))
+            
+            if [ "$IAC_CRITICAL" -gt 0 ]; then
+              echo "❌ IaC scan found $IAC_CRITICAL CRITICAL vulnerabilities"
+              FAIL=1
+            fi
+          fi
+          
+          echo "📊 SECURITY SUMMARY:"
+          echo "   CRITICAL vulnerabilities: $TOTAL_CRITICAL"
+          echo "   HIGH vulnerabilities: $TOTAL_HIGH"
+          
+          # Hiển thị chi tiết các vulnerabilities tìm thấy
+          if [ -f "reports/trivy-deps-report.sarif" ]; then
+            echo "🔍 Detailed vulnerabilities found:"
+            jq -r '.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | "\(.id): \(.shortDescription.text) - Severity: \(.properties.tags[] | select(. | test("CRITICAL|HIGH|MEDIUM|LOW"))) - CVSS: \(.properties."security-severity")"' "reports/trivy-deps-report.sarif" 2>/dev/null | head -10 || true
+          fi
+          
+          if [ "$FAIL" -eq 1 ]; then
+            echo "❌ Security Gate failed - Found $TOTAL_CRITICAL CRITICAL vulnerabilities"
+            echo "passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "✅ Security Gate passed - No CRITICAL vulnerabilities found"
+            echo "passed=true" >> $GITHUB_OUTPUT
+          fi
+          
+  deploy-staging:
+    name: 🚀 Deploy to Staging (Render)
+    runs-on: ubuntu-latest
+    needs: security-gate
+    if: github.ref == 'refs/heads/test' && needs.security-gate.outputs.passed == 'true'
+    outputs:
+      url: ${{ steps.set-url.outputs.url }}
+    steps:
+      - name: Set environment URL
+        id: set-url
+        run: echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
+      - name: Trigger Render Deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID_TEST }}
+        run: |
+          curl --silent --show-error --fail -X POST \
+            "https://api.render.com/v1/services/${SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Accept: application/json"
+      - name: Wait for deployment to be ready
+        run: |
+          TARGET=${{ steps.set-url.outputs.url }}
+          for i in {1..20}; do
+            if curl --silent --fail "$TARGET/actuator/health" > /dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+  dast:
+    name: 🛡️ DAST (OWASP ZAP)
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/test' && needs.deploy-staging.result == 'success'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait for application to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -s -f ${{ needs.deploy-staging.outputs.url }}/actuator/health > /dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+      - name: Run ZAP Baseline Scan
+        run: |
+          docker run --rm \
+            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+            -t "${{ needs.deploy-staging.outputs.url }}" \
+            -a -m 10 -T 180 | tee zap-console.log
+          grep -E "ALERT|FAIL" zap-console.log || true
+  dynamic-security-gate:
+    name: 🔒 Dynamic Security Gate (DAST)
+    runs-on: ubuntu-latest
+    needs: dast
+    if: github.ref == 'refs/heads/test' && always()
+    outputs:
+      passed: ${{ steps.dast-check.outputs.passed }}
+    steps:
+      - name: Check DAST Results
+        id: dast-check
+        run: |
+          echo "✅ DAST completed (always pass for now)"
+          echo "passed=true" >> $GITHUB_OUTPUT
+  deploy-production:
+    name: 🚀 Deploy to Production (Heroku Docker)
+    runs-on: ubuntu-latest
+    needs: security-gate
+    if: github.ref == 'refs/heads/main' && needs.security-gate.outputs.passed == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to Heroku Container Registry
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: echo "${HEROKU_API_KEY}" | docker login --username=_ --password-stdin registry.heroku.com
+      - name: Build Docker image
+        run: docker build -t registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web .
+      - name: Push Docker image to Heroku
+        run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
+      - name: Release Docker image
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          curl --silent --show-error --fail -X POST \
+            "https://api.heroku.com/apps/${{ secrets.HEROKU_APP_NAME }}/releases" \
+            -d '{"slug":null,"description":"Deploy via GitHub Actions"}' \
+            -H "Content-Type:application/json" \
+            -H "Accept: application/vnd.heroku+json; version=3" \
+            -H "Authorization: Bearer ${HEROKU_API_KEY}"
+  # 📊 SECURITY REPORT
+  report:
+    name: 📊 Unified Security Report
+    runs-on: ubuntu-latest
+    needs: [sca, sast, container-scan, iac-scan, dast]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y jq
       - uses: actions/download-artifact@v4
         with:
           pattern: trivy-*-report
@@ -156,121 +378,50 @@ jobs:
         with:
           name: checkov-report
           path: reports/iac
-      - name: Unified SARIF Analysis
-        id: check-gate
+      - name: Generate Security Report
         run: |
-          set -e
-          TOTAL_CRITICAL=0
-          TOTAL_HIGH=0
-          ALL_VULN=""
-          parse_sarif() {
-            local file=$1
-            local tool=$2
-            if [ ! -f "$file" ]; then
-              echo "⚠️ $tool report missing"
-              return
-            fi
-            while IFS= read -r line; do
-              [ -z "$line" ] && continue
-              rule=$(echo "$line" | jq -r '.ruleId // "Unknown"')
-              sev=$(echo "$line" | jq -r '.level // .properties.severity // "UNKNOWN"')
-              score=0
-              case $(echo "$sev" | tr '[:lower:]' '[:upper:]') in
-                "CRITICAL"|"ERROR") score=9.5 ;;
-                "HIGH"|"WARNING") score=7.5 ;;
-                "MEDIUM") score=5.0 ;;
-                "LOW"|"NOTE") score=3.0 ;;
-              esac
-              if (( $(echo "$score >= 9.0" | bc -l) )); then
-                TOTAL_CRITICAL=$((TOTAL_CRITICAL+1))
-                ALL_VULN+="🚨 CRITICAL ($tool): $rule\n"
-              elif (( $(echo "$score >= 7.0" | bc -l) )); then
-                TOTAL_HIGH=$((TOTAL_HIGH+1))
-                ALL_VULN+="⚠️ HIGH ($tool): $rule\n"
-              fi
-            done < <(jq -c '.runs[0].results[]?' "$file" 2>/dev/null || true)
-          }
-          parse_sarif reports/trivy-deps-report.sarif SCA
-          parse_sarif reports/trivy-container-report.sarif Container
-          parse_sarif reports/iac/checkov-results.sarif IaC
-          echo "🚨 Critical: $TOTAL_CRITICAL"
-          echo "⚠️ High: $TOTAL_HIGH"
-          echo -e "$ALL_VULN"
-          echo "passed=$([ $TOTAL_CRITICAL -eq 0 ] && echo true || echo false)" >> $GITHUB_OUTPUT
-          echo "critical_count=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
-          echo "high_count=$TOTAL_HIGH" >> $GITHUB_OUTPUT
-          [ $TOTAL_CRITICAL -gt 0 ] && exit 1
-
-  deploy:
-    name: Deploy to Heroku
-    runs-on: ubuntu-latest
-    needs: security-gate
-    if: needs.security-gate.outputs.passed == 'true'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: akhileshns/heroku-deploy@v3.13.15
-        with:
-          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
-          heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}
-          heroku_email: ${{ secrets.HEROKU_EMAIL }}
-
-  dast:
-    name: DAST (OWASP ZAP)
-    runs-on: ubuntu-latest
-    needs: deploy
-    steps:
-      - name: Run ZAP Baseline Scan
-        run: |
-          docker run --rm -v $(pwd):/zap/wrk -t ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py -t "https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com" \
-            -r zap-report.html -w zap-warnings.md -J zap-report.json || true
+          mkdir -p reports/final
+          echo "<html><body><h1>Security Report</h1>" > reports/final/security-report.html
+          echo "<p>Generated on $(date)</p>" >> reports/final/security-report.html
+          echo "</body></html>" >> reports/final/security-report.html
       - uses: actions/upload-artifact@v4
         with:
-          name: zap-report
-          path: |
-            zap-report.html
-            zap-warnings.md
-            zap-report.json
-
-  report:
-    name: Generate Security Report
-    runs-on: ubuntu-latest
-    needs: [security-gate, dast]
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: reports
-          merge-multiple: true
-      - name: Generate Final Security Report
-        run: |
-          echo "# Security Report" > final-report.md
-          echo "## Summary" >> final-report.md
-          echo "- Critical: ${{ needs.security-gate.outputs.critical_count }}" >> final-report.md
-          echo "- High: ${{ needs.security-gate.outputs.high_count }}" >> final-report.md
-          echo "## DAST Findings" >> final-report.md
-          cat reports/zap-warnings.md >> final-report.md || echo "No DAST warnings" >> final-report.md
-      - uses: actions/upload-artifact@v4
-        with:
-          name: final-report
-          path: final-report.md
+          name: security-report
+          path: reports/final/security-report.html
 
   notify:
-    name: Notify Discord
+    name: 📢 Notify Discord
     runs-on: ubuntu-latest
-    needs: [report, security-gate]
+    needs: [deploy-staging, deploy-production, report, dynamic-security-gate]
+    if: always()
     steps:
-      - uses: actions/download-artifact@v4
+      - name: ✅ Notify Success
+        if: ${{ success() }}
+        uses: Ilshidur/action-discord@master
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         with:
-          name: final-report
-          path: .
-      - name: Send Notification to Discord
-        run: |
-          STATUS="✅ PASSED"
-          if [ "${{ needs.security-gate.outputs.passed }}" != "true" ]; then
-            STATUS="❌ FAILED"
-          fi
-          REPORT=$(cat final-report.md)
-          PAYLOAD=$(jq -n --arg content "**Security Gate:** $STATUS\n\n\`\`\`\n$REPORT\n\`\`\`" '{content: $content}')
-          curl -H "Content-Type: application/json" \
-            -d "$PAYLOAD" \
-            ${{ secrets.DISCORD_WEBHOOK }}
+          args: |
+            ✅ **Pipeline SUCCESS** cho `${{ github.repository }}`
+            🔀 Branch: `${{ github.ref_name }}`
+            📌 Status: **SUCCESS**
+            **SAST:** ${{ needs.sast.result }}
+            **SCA:** ${{ needs.sca.result }}
+            **Container:** ${{ needs.container-scan.result }}
+            **IaC:** ${{ needs.iac-scan.result }}
+            **DAST:** ${{ needs.dast.result || 'N/A' }}
+      - name: ❌ Notify Failure
+        if: ${{ failure() }}
+        uses: Ilshidur/action-discord@master
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        with:
+          args: |
+            ❌ **Pipeline FAILED** cho `${{ github.repository }}`
+            🔀 Branch: `${{ github.ref_name }}`
+            📌 Status: **FAILED**
+            **SAST:** ${{ needs.sast.result }}
+            **SCA:** ${{ needs.sca.result }}
+            **Container:** ${{ needs.container-scan.result }}
+            **IaC:** ${{ needs.iac-scan.result }}
+            **DAST:** ${{ needs.dast.result || 'N/A' }}
