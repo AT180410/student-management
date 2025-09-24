@@ -43,16 +43,15 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
       - run: chmod +x ./mvnw
-      - name: Build with Maven to generate dependencies
-        run: ./mvnw -B compile dependency:tree
-      - name: Run Trivy vulnerability scanner for dependencies
+      - run: ./mvnw -B compile dependency:tree
+      - name: Run Trivy dependency scan
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-deps-report.sarif'
-          severity: 'CRITICAL,HIGH'
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-deps-report.sarif
+          severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: 0
       - uses: actions/upload-artifact@v4
@@ -90,6 +89,7 @@ jobs:
             -Dsonar.tests=src/test/java \
             -Dsonar.junit.reportPaths=target/surefire-reports \
             -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+
   container-scan:
     name: Container Scan (Trivy)
     runs-on: ubuntu-latest
@@ -118,16 +118,14 @@ jobs:
     name: IaC Security (Checkov)
     runs-on: ubuntu-latest
     needs: build
-    permissions:
-      security-events: write
     steps:
       - uses: actions/checkout@v4
-      - name: Run Checkov (IoC scan)
+      - name: Run Checkov (IaC scan)
         uses: bridgecrewio/checkov-action@master
         with:
           directory: .
-          output_format: cli,sarif
-          output_file_path: ./checkov-results.sarif
+          output_format: sarif
+          output_file_path: checkov-results.sarif
           soft_fail: true
       - uses: actions/upload-artifact@v4
         with:
@@ -137,7 +135,7 @@ jobs:
         with:
           sarif_file: checkov-results.sarif
 
-  # 🔒 OPTIMIZED SECURITY GATE - UNIFIED APPROACH
+  # 🔒 SECURITY GATE
   security-gate:
     name: 🔒 Security Gate
     runs-on: ubuntu-latest
@@ -147,516 +145,132 @@ jobs:
       critical_count: ${{ steps.check-gate.outputs.critical_count }}
       high_count: ${{ steps.check-gate.outputs.high_count }}
     steps:
-      - name: Install jq for JSON parsing
-        run: sudo apt-get update && sudo apt-get install -y jq
-  
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y jq bc
       - uses: actions/download-artifact@v4
         with:
           pattern: trivy-*-report
           path: reports
           merge-multiple: true
-  
       - uses: actions/download-artifact@v4
         with:
           name: checkov-report
           path: reports/iac
-  
       - name: Unified SARIF Analysis
         id: check-gate
         run: |
           set -e
-          echo "🔒 Starting Unified SARIF Analysis..."
-          
-          # Initialize counters
           TOTAL_CRITICAL=0
           TOTAL_HIGH=0
-          ALL_VULNERABILITIES=""
-          
-          # Function to parse SARIF and extract severity
+          ALL_VULN=""
           parse_sarif() {
-            local sarif_file=$1
-            local tool_name=$2
-            
-            if [ ! -f "$sarif_file" ]; then
-              echo "⚠️ No $tool_name report found: $sarif_file"
+            local file=$1
+            local tool=$2
+            if [ ! -f "$file" ]; then
+              echo "⚠️ $tool report missing"
               return
             fi
-            
-            echo "📊 Analyzing $tool_name report..."
-            
-            # Parse using jq and process line by line
             while IFS= read -r line; do
-              if [ -n "$line" ]; then
-                local ruleId=$(echo "$line" | jq -r '.ruleId // empty')
-                local severity=$(echo "$line" | jq -r '
-                  # Try multiple severity fields
-                  .level // 
-                  .properties.severity // 
-                  .properties."security-severity" // 
-                  ( .properties.tags[]? | select(. | test("CRITICAL|HIGH|MEDIUM|LOW"; "i")) ) //
-                  "UNKNOWN"
-                ' 2>/dev/null || echo "UNKNOWN")
-                
-                # Convert to numeric score for consistent evaluation
-                local score=0
-                case $(echo "$severity" | tr '[:lower:]' '[:upper:]') in
-                  "CRITICAL"|"ERROR") score=9.5 ;;
-                  "HIGH"|"WARNING") score=7.5 ;;
-                  "MEDIUM") score=5.0 ;;
-                  "LOW"|"NOTE") score=3.0 ;;
-                  *) 
-                    # If it's a number, use it directly
-                    if [[ "$severity" =~ ^[0-9.]+$ ]]; then
-                      score="$severity"
-                    else
-                      score=0
-                    fi
-                    ;;
-                esac
-                
-                # Count based on CVSS scores
-                if (( $(echo "$score >= 9.0" | bc -l 2>/dev/null || echo 0) )); then
-                  TOTAL_CRITICAL=$((TOTAL_CRITICAL + 1))
-                  ALL_VULNERABILITIES+="🚨 CRITICAL ($tool_name): $ruleId (Score: $score)"$'\n'
-                elif (( $(echo "$score >= 7.0" | bc -l 2>/dev/null || echo 0) )); then
-                  TOTAL_HIGH=$((TOTAL_HIGH + 1))
-                  ALL_VULNERABILITIES+="⚠️ HIGH ($tool_name): $ruleId (Score: $score)"$'\n'
-                fi
+              [ -z "$line" ] && continue
+              rule=$(echo "$line" | jq -r '.ruleId // "Unknown"')
+              sev=$(echo "$line" | jq -r '.level // .properties.severity // "UNKNOWN"')
+              score=0
+              case $(echo "$sev" | tr '[:lower:]' '[:upper:]') in
+                "CRITICAL"|"ERROR") score=9.5 ;;
+                "HIGH"|"WARNING") score=7.5 ;;
+                "MEDIUM") score=5.0 ;;
+                "LOW"|"NOTE") score=3.0 ;;
+              esac
+              if (( $(echo "$score >= 9.0" | bc -l) )); then
+                TOTAL_CRITICAL=$((TOTAL_CRITICAL+1))
+                ALL_VULN+="🚨 CRITICAL ($tool): $rule\n"
+              elif (( $(echo "$score >= 7.0" | bc -l) )); then
+                TOTAL_HIGH=$((TOTAL_HIGH+1))
+                ALL_VULN+="⚠️ HIGH ($tool): $rule\n"
               fi
-            done < <(jq -c '.runs[0].results[]?' "$sarif_file" 2>/dev/null || echo "")
+            done < <(jq -c '.runs[0].results[]?' "$file" 2>/dev/null || true)
           }
-          
-          # Install bc for floating point comparison
-          sudo apt-get install -y bc
-          
-          # Analyze all SARIF files
-          parse_sarif "reports/trivy-deps-report.sarif" "SCA"
-          parse_sarif "reports/trivy-container-report.sarif" "Container"
-          parse_sarif "reports/iac/checkov-results.sarif" "IaC"
-          
-          echo "📊 FINAL SECURITY SUMMARY:"
-          echo "========================================"
-          echo "🚨 CRITICAL Vulnerabilities (CVSS ≥ 9.0): $TOTAL_CRITICAL"
-          echo "⚠️ HIGH Vulnerabilities (CVSS 7.0-8.9): $TOTAL_HIGH"
-          echo "========================================"
-          
-          if [ -n "$ALL_VULNERABILITIES" ]; then
-            echo "🔍 DETAILED FINDINGS:"
-            echo "$ALL_VULNERABILITIES"
-          else
-            echo "✅ No critical or high vulnerabilities found"
-          fi
-          
-          # Set outputs
-          echo "passed=$([ $TOTAL_CRITICAL -eq 0 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+          parse_sarif reports/trivy-deps-report.sarif SCA
+          parse_sarif reports/trivy-container-report.sarif Container
+          parse_sarif reports/iac/checkov-results.sarif IaC
+          echo "🚨 Critical: $TOTAL_CRITICAL"
+          echo "⚠️ High: $TOTAL_HIGH"
+          echo -e "$ALL_VULN"
+          echo "passed=$([ $TOTAL_CRITICAL -eq 0 ] && echo true || echo false)" >> $GITHUB_OUTPUT
           echo "critical_count=$TOTAL_CRITICAL" >> $GITHUB_OUTPUT
           echo "high_count=$TOTAL_HIGH" >> $GITHUB_OUTPUT
-          
-          if [ $TOTAL_CRITICAL -gt 0 ]; then
-            echo "❌ Security Gate FAILED - $TOTAL_CRITICAL critical vulnerabilities found"
-            exit 1
-          else
-            echo "✅ Security Gate PASSED"
-          fi
-            
-  deploy-staging:
-    name: 🚀 Deploy to Staging (Render)
+          [ $TOTAL_CRITICAL -gt 0 ] && exit 1
+
+  deploy:
+    name: Deploy to Heroku
     runs-on: ubuntu-latest
     needs: security-gate
-    if: github.ref == 'refs/heads/test' && needs.security-gate.outputs.passed == 'true'
-    outputs:
-      url: ${{ steps.set-url.outputs.url }}
-    steps:
-      - name: Set environment URL
-        id: set-url
-        run: echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
-      - name: Trigger Render Deploy
-        env:
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-          SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID_TEST }}
-        run: |
-          curl --silent --show-error --fail -X POST \
-            "https://api.render.com/v1/services/${SERVICE_ID}/deploys" \
-            -H "Authorization: Bearer ${RENDER_API_KEY}" \
-            -H "Accept: application/json"
-      - name: Wait for deployment to be ready
-        run: |
-          TARGET=${{ steps.set-url.outputs.url }}
-          for i in {1..20}; do
-            if curl --silent --fail "$TARGET/actuator/health" > /dev/null; then
-              exit 0
-            fi
-            sleep 10
-          done
-          exit 1
-  dast:
-    name: 🛡️ DAST (OWASP ZAP)
-    runs-on: ubuntu-latest
-    needs: deploy-staging
-    if: github.ref == 'refs/heads/test' && needs.deploy-staging.result == 'success'
-    timeout-minutes: 30
+    if: needs.security-gate.outputs.passed == 'true'
     steps:
       - uses: actions/checkout@v4
-      - name: Wait for application to be ready
-        run: |
-          for i in {1..30}; do
-            if curl -s -f ${{ needs.deploy-staging.outputs.url }}/actuator/health > /dev/null; then
-              exit 0
-            fi
-            sleep 10
-          done
-          exit 1
+      - uses: akhileshns/heroku-deploy@v3.13.15
+        with:
+          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
+          heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}
+          heroku_email: ${{ secrets.HEROKU_EMAIL }}
+
+  dast:
+    name: DAST (OWASP ZAP)
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
       - name: Run ZAP Baseline Scan
         run: |
-          docker run --rm \
-            ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t "${{ needs.deploy-staging.outputs.url }}" \
-            -a -m 10 -T 180 | tee zap-console.log
-          grep -E "ALERT|FAIL" zap-console.log || true
-  dynamic-security-gate:
-    name: 🔒 Dynamic Security Gate (DAST)
-    runs-on: ubuntu-latest
-    needs: dast
-    if: github.ref == 'refs/heads/test' && always()
-    outputs:
-      passed: ${{ steps.dast-check.outputs.passed }}
-    steps:
-      - name: Check DAST Results
-        id: dast-check
-        run: |
-          echo "✅ DAST completed (always pass for now)"
-          echo "passed=true" >> $GITHUB_OUTPUT
-  deploy-production:
-    name: 🚀 Deploy to Production (Heroku Docker)
-    runs-on: ubuntu-latest
-    needs: security-gate
-    if: github.ref == 'refs/heads/main' && needs.security-gate.outputs.passed == 'true'
-    steps:
-      - uses: actions/checkout@v4
-      - name: Login to Heroku Container Registry
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: echo "${HEROKU_API_KEY}" | docker login --username=_ --password-stdin registry.heroku.com
-      - name: Build Docker image
-        run: docker build -t registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web .
-      - name: Push Docker image to Heroku
-        run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
-      - name: Release Docker image
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          curl --silent --show-error --fail -X POST \
-            "https://api.heroku.com/apps/${{ secrets.HEROKU_APP_NAME }}/releases" \
-            -d '{"slug":null,"description":"Deploy via GitHub Actions"}' \
-            -H "Content-Type:application/json" \
-            -H "Accept: application/vnd.heroku+json; version=3" \
-            -H "Authorization: Bearer ${HEROKU_API_KEY}"
- # 📊 UNIFIED SECURITY REPORT
-  report:
-    name: 📊 Unified Security Report
-    runs-on: ubuntu-latest
-    needs: [sca, sast, container-scan, iac-scan, security-gate]
-    if: always()
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq bc
-  
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: trivy-*-report
-          path: reports
-          merge-multiple: true
-  
-      - uses: actions/download-artifact@v4
-        with:
-          name: checkov-report
-          path: reports/iac
-  
-      - name: Generate Comprehensive HTML Report
-        run: |
-          mkdir -p reports/final
-          REPORT=reports/final/security-report.html
-          
-          # Get security gate results
-          CRITICAL_COUNT="${{ needs.security-gate.outputs.critical_count }}"
-          HIGH_COUNT="${{ needs.security-gate.outputs.high_count }}"
-          GATE_PASSED="${{ needs.security-gate.outputs.passed }}"
-          
-          cat > $REPORT << 'EOF'
-          <html>
-          <head>
-              <title>🔒 Unified Security Scan Report</title>
-              <meta charset="UTF-8">
-              <style>
-                  :root {
-                      --critical: #d32f2f;
-                      --high: #f57c00;
-                      --medium: #fbc02d;
-                      --low: #388e3c;
-                      --passed: #4caf50;
-                      --failed: #d32f2f;
-                  }
-                  * { box-sizing: border-box; margin: 0; padding: 0; }
-                  body { 
-                      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-                      line-height: 1.6; 
-                      color: #333; 
-                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                      min-height: 100vh;
-                      padding: 20px;
-                  }
-                  .container { 
-                      max-width: 1400px; 
-                      margin: 0 auto; 
-                      background: white; 
-                      border-radius: 15px;
-                      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-                      overflow: hidden;
-                  }
-                  .header { 
-                      background: linear-gradient(135deg, #2c3e50, #34495e);
-                      color: white; 
-                      padding: 40px; 
-                      text-align: center;
-                      position: relative;
-                  }
-                  .header h1 { 
-                      font-size: 2.5em; 
-                      margin-bottom: 10px;
-                      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-                  }
-                  .summary-grid { 
-                      display: grid; 
-                      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); 
-                      gap: 20px; 
-                      padding: 30px;
-                      background: #f8f9fa;
-                  }
-                  .summary-card { 
-                      padding: 25px; 
-                      border-radius: 10px; 
-                      text-align: center;
-                      box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-                      transition: transform 0.3s ease;
-                  }
-                  .summary-card:hover { transform: translateY(-5px); }
-                  .critical { background: linear-gradient(135deg, #ffebee, #ffcdd2); border-left: 5px solid var(--critical); }
-                  .high { background: linear-gradient(135deg, #fff3e0, #ffe0b2); border-left: 5px solid var(--high); }
-                  .passed { background: linear-gradient(135deg, #e8f5e8, #c8e6c9); border-left: 5px solid var(--passed); }
-                  .failed { background: linear-gradient(135deg, #ffebee, #ffcdd2); border-left: 5px solid var(--failed); }
-                  .scan-section { 
-                      margin: 30px; 
-                      padding: 25px;
-                      border-radius: 10px;
-                      background: #f8f9fa;
-                      border-left: 5px solid #3498db;
-                  }
-                  .vuln-grid { 
-                      display: grid; 
-                      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
-                      gap: 15px; 
-                      margin-top: 15px;
-                  }
-                  .vuln-item { 
-                      padding: 15px; 
-                      border-radius: 8px; 
-                      background: white;
-                      border-left: 4px solid;
-                      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-                  }
-                  .vuln-critical { border-left-color: var(--critical); }
-                  .vuln-high { border-left-color: var(--high); }
-                  .timestamp { 
-                      opacity: 0.8; 
-                      font-size: 0.9em;
-                      margin-top: 10px;
-                  }
-                  .status-badge {
-                      display: inline-block;
-                      padding: 5px 15px;
-                      border-radius: 20px;
-                      color: white;
-                      font-weight: bold;
-                      margin: 10px 0;
-                  }
-                  .status-passed { background: var(--passed); }
-                  .status-failed { background: var(--failed); }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <h1>🔒 Unified Security Scan Report</h1>
-                      <div class="timestamp">Generated on: $(date +"%Y-%m-%d %H:%M:%S")</div>
-                  </div>
-                  
-                  <div class="summary-grid">
-          EOF
-          
-          # Summary Cards
-          echo "<div class='summary-card critical'><h3>🚨 Critical Vulnerabilities</h3><h1>$CRITICAL_COUNT</h1><p>CVSS ≥ 9.0</p></div>" >> $REPORT
-          echo "<div class='summary-card high'><h3>⚠️ High Vulnerabilities</h3><h1>$HIGH_COUNT</h1><p>CVSS 7.0-8.9</p></div>" >> $REPORT
-          
-          if [ "$GATE_PASSED" = "true" ]; then
-              echo "<div class='summary-card passed'><h3>✅ Security Status</h3><h1>PASSED</h1><p>No critical vulnerabilities</p></div>" >> $REPORT
-          else
-              echo "<div class='summary-card failed'><h3>❌ Security Status</h3><h1>FAILED</h1><p>$CRITICAL_COUNT critical vulnerabilities found</p></div>" >> $REPORT
-          fi
-          
-          cat >> $REPORT << 'EOF'
-                  </div>
-          EOF
-          
-          # Function to generate scan section
-          generate_scan_section() {
-              local file=$1
-              local title=$2
-              local icon=$3
-              
-              if [ ! -f "$file" ]; then
-                  echo "<div class='scan-section'><h2>$icon $title</h2><p>No report available</p></div>" >> $REPORT
-                  return
-              fi
-              
-              local critical_count=0
-              local high_count=0
-              local vuln_details=""
-              
-              while IFS= read -r line; do
-                  if [ -n "$line" ]; then
-                      local ruleId=$(echo "$line" | jq -r '.ruleId // "Unknown"' 2>/dev/null)
-                      local message=$(echo "$line" | jq -r '.message.text // "No description"' 2>/dev/null | sed 's/"/\\"/g')
-                      local severity=$(echo "$line" | jq -r '.level // .properties.severity // "UNKNOWN"' 2>/dev/null)
-                      
-                      local score=0
-                      case $(echo "$severity" | tr '[:lower:]' '[:upper:]') in
-                          "CRITICAL"|"ERROR") score=9.5 ;;
-                          "HIGH"|"WARNING") score=7.5 ;;
-                          "MEDIUM") score=5.0 ;;
-                          "LOW"|"NOTE") score=3.0 ;;
-                          *) score=0 ;;
-                      esac
-                      
-                      if (( $(echo "$score >= 9.0" | bc -l 2>/dev/null || echo 0) )); then
-                          critical_count=$((critical_count + 1))
-                          vuln_details+="<div class='vuln-item vuln-critical'><strong>🚨 $ruleId</strong><br>$message<br><small>Score: $score</small></div>"
-                      elif (( $(echo "$score >= 7.0" | bc -l 2>/dev/null || echo 0) )); then
-                          high_count=$((high_count + 1))
-                          vuln_details+="<div class='vuln-item vuln-high'><strong>⚠️ $ruleId</strong><br>$message<br><small>Score: $score</small></div>"
-                      fi
-                  fi
-              done < <(jq -c '.runs[0].results[]?' "$file" 2>/dev/null || echo "")
-              
-              echo "<div class='scan-section'>" >> $REPORT
-              echo "<h2>$icon $title</h2>" >> $REPORT
-              echo "<p><strong>Critical:</strong> $critical_count | <strong>High:</strong> $high_count</p>" >> $REPORT
-              if [ -n "$vuln_details" ]; then
-                  echo "<div class='vuln-grid'>$vuln_details</div>" >> $REPORT
-              else
-                  echo "<p>✅ No critical or high vulnerabilities found</p>" >> $REPORT
-              fi
-              echo "</div>" >> $REPORT
-          }
-          
-          # Generate sections for each scan type
-          generate_scan_section "reports/trivy-deps-report.sarif" "SCA - Software Composition Analysis" "📦"
-          generate_scan_section "reports/trivy-container-report.sarif" "Container Security Scan" "🐳"
-          generate_scan_section "reports/iac/checkov-results.sarif" "IaC Security Scan" "🔧"
-          
-          # DAST Section
-          echo "<div class='scan-section'>" >> $REPORT
-          echo "<h2>🛡️ DAST - Dynamic Application Security Testing</h2>" >> $REPORT
-          if [ "${{ github.ref }}" == "refs/heads/test" ]; then
-              if [ "${{ needs.dast.result }}" == "success" ]; then
-                  echo "<p>✅ DAST completed successfully</p>" >> $REPORT
-                  echo "<p><strong>Target:</strong> ${{ needs.deploy-staging.outputs.url }}</p>" >> $REPORT
-              else
-                  echo "<p>⚠️ DAST status: ${{ needs.dast.result }}</p>" >> $REPORT
-              fi
-          else
-              echo "<p>ℹ️ DAST only executes on test branch</p>" >> $REPORT
-          fi
-          echo "</div>" >> $REPORT
-          
-          # Recommendations Section
-          if [ "$CRITICAL_COUNT" -gt 0 ]; then
-              cat >> $REPORT << 'EOF'
-                  <div class='scan-section' style='border-left-color: var(--critical);'>
-                      <h2>🚨 Security Recommendations</h2>
-                      <div class='vuln-grid'>
-                          <div class='vuln-item'>
-                              <h3>Immediate Actions Required:</h3>
-                              <ul>
-                                  <li>Address all critical vulnerabilities before deployment</li>
-                                  <li>Update vulnerable dependencies</li>
-                                  <li>Patch container base images</li>
-                                  <li>Review IaC configurations</li>
-                              </ul>
-                          </div>
-                      </div>
-                  </div>
-          EOF
-          fi
-          
-          cat >> $REPORT << 'EOF'
-              </div>
-          </body>
-          </html>
-          EOF
-          
-          echo "📊 Generated comprehensive security report"
-          echo "   🚨 Critical: $CRITICAL_COUNT"
-          echo "   ⚠️ High: $HIGH_COUNT"
-          echo "   ✅ Gate Status: $GATE_PASSED"
-  
+          docker run --rm -v $(pwd):/zap/wrk -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t "https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com" \
+            -r zap-report.html -w zap-warnings.md -J zap-report.json || true
       - uses: actions/upload-artifact@v4
         with:
-          name: security-report
-          path: reports/final/security-report.html
-  
-      - name: Upload HTML report as artifact
-        uses: actions/upload-artifact@v4
+          name: zap-report
+          path: |
+            zap-report.html
+            zap-warnings.md
+            zap-report.json
+
+  report:
+    name: Generate Security Report
+    runs-on: ubuntu-latest
+    needs: [security-gate, dast]
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          name: security-html-report
-          path: reports/final/security-report.html
+          path: reports
+          merge-multiple: true
+      - name: Generate Final Security Report
+        run: |
+          echo "# Security Report" > final-report.md
+          echo "## Summary" >> final-report.md
+          echo "- Critical: ${{ needs.security-gate.outputs.critical_count }}" >> final-report.md
+          echo "- High: ${{ needs.security-gate.outputs.high_count }}" >> final-report.md
+          echo "## DAST Findings" >> final-report.md
+          cat reports/zap-warnings.md >> final-report.md || echo "No DAST warnings" >> final-report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final-report
+          path: final-report.md
 
   notify:
-    name: 📢 Notify Discord
+    name: Notify Discord
     runs-on: ubuntu-latest
-    needs: [deploy-staging, deploy-production, report, dynamic-security-gate]
-    if: always()
+    needs: [report, security-gate]
     steps:
-      - name: ✅ Notify Success
-        if: ${{ success() }}
-        uses: Ilshidur/action-discord@master
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      - uses: actions/download-artifact@v4
         with:
-          args: |
-            ✅ **Pipeline SUCCESS** cho `${{ github.repository }}`
-            🔀 Branch: `${{ github.ref_name }}`
-            📌 Status: **SUCCESS**
-            **SAST:** ${{ needs.sast.result }}
-            **SCA:** ${{ needs.sca.result }}
-            **Container:** ${{ needs.container-scan.result }}
-            **IaC:** ${{ needs.iac-scan.result }}
-            **DAST:** ${{ needs.dast.result || 'N/A' }}
-      - name: ❌ Notify Failure
-        if: ${{ failure() }}
-        uses: Ilshidur/action-discord@master
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        with:
-          args: |
-            ❌ **Pipeline FAILED** cho `${{ github.repository }}`
-            🔀 Branch: `${{ github.ref_name }}`
-            📌 Status: **FAILED**
-            **SAST:** ${{ needs.sast.result }}
-            **SCA:** ${{ needs.sca.result }}
-            **Container:** ${{ needs.container-scan.result }}
-            **IaC:** ${{ needs.iac-scan.result }}
-            **DAST:** ${{ needs.dast.result || 'N/A' }}
+          name: final-report
+          path: .
+      - name: Send Notification to Discord
+        run: |
+          STATUS="✅ PASSED"
+          if [ "${{ needs.security-gate.outputs.passed }}" != "true" ]; then
+            STATUS="❌ FAILED"
+          fi
+          REPORT=$(cat final-report.md)
+          PAYLOAD=$(jq -n --arg content "**Security Gate:** $STATUS\n\n\`\`\`\n$REPORT\n\`\`\`" '{content: $content}')
+          curl -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            ${{ secrets.DISCORD_WEBHOOK }}
