@@ -300,7 +300,8 @@ jobs:
             Status: **SUCCESS**
       - uses: Ilshidur/action-discord@master
         if: ${{ failure() }}
-        env: { DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }} }
+        env: 
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }} 
         with:
           args: |
             ❌ Pipeline FAILED for `${{ github.repository }}`
