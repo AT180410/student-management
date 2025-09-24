@@ -332,8 +332,7 @@ jobs:
       needs: security-gate
       if: |
         needs.security-gate.outputs.passed == 'true' &&
-        github.ref == 'refs/heads/main' &&
-        (needs.dast.result == 'success' || needs.dast.result == 'skipped')
+        github.ref == 'refs/heads/main' 
       steps:
         - uses: actions/checkout@v4
   
