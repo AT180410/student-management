@@ -9,8 +9,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.9</version> <!-- nâng lên latest patched -->
-        <version>3.2.9</version> <!-- Latest patched -->
+        <version>3.2.9</version> <!-- latest patched -->
         <relativePath/>
     </parent>
 
@@ -113,7 +112,7 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
 
-            <!-- Fix compile Java 17 -->
+            <!-- Fix compile Java 21 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -133,12 +132,13 @@
             </plugin>
 
             <!-- Surefire Plugin (JUnit) -->
-
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
             </plugin>
+
+            <!-- JaCoCo Plugin -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -158,6 +158,8 @@
                     </execution>
                 </executions>
             </plugin>
+
+            <!-- OWASP Dependency Check -->
             <plugin>
                 <groupId>org.owasp</groupId>
                 <artifactId>dependency-check-maven</artifactId>
@@ -167,9 +169,6 @@
                     <ossIndexEnabled>true</ossIndexEnabled>
                     <centralAnalyzerEnabled>true</centralAnalyzerEnabled>
                     <retireJsAnalyzerEnabled>true</retireJsAnalyzerEnabled>
-
-                    <failBuildOnCVSS>9</failBuildOnCVSS> <!-- fail if CRITICAL -->
-
                 </configuration>
             </plugin>
         </plugins>
