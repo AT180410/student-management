@@ -327,34 +327,34 @@ jobs:
           set -e
 
   deploy-production:
-    name: 🚀 Deploy to Production (Heroku Docker)
-    runs-on: ubuntu-latest
-    needs: security-gate
-    if: github.ref == 'refs/heads/main' && needs.security-gate.outputs.passed == 'true'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Login to Heroku Container Registry
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          echo "${HEROKU_API_KEY}" | docker login --username=_ --password-stdin registry.heroku.com
-      - name: Build Docker image
-        run: docker build -t registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web .
-
-      - name: Push Docker image to Heroku
-        run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
-
-      - name: Release Docker image (use Authorization header)
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          curl --silent --show-error --fail -X POST \
-            "https://api.heroku.com/apps/${{ secrets.HEROKU_APP_NAME }}/releases" \
-            -d '{"slug":null,"description":"Deploy via GitHub Actions"}' \
-            -H "Content-Type:application/json" \
-            -H "Accept: application/vnd.heroku+json; version=3" \
-            -H "Authorization: Bearer ${HEROKU_API_KEY}"
+      name: 🚀 Deploy to Production (Heroku Docker)
+      runs-on: ubuntu-latest
+      needs: security-gate
+      if: |
+        needs.security-gate.outputs.passed == 'true' &&
+        github.ref == 'refs/heads/main' &&
+        (needs.dast.result == 'success' || needs.dast.result == 'skipped')
+      steps:
+        - uses: actions/checkout@v4
+  
+        # Cài Heroku CLI
+        - name: Set up Heroku CLI
+          uses: heroku/actions/setup@v2
+  
+        - name: Log in to Heroku Container Registry
+          run: echo "${{ secrets.HEROKU_API_KEY }}" | docker login --username=_ --password-stdin registry.heroku.com
+  
+        - name: Build Docker image
+          run: docker build -t registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web .
+  
+        - name: Push Docker image to Heroku
+          run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
+  
+        - name: Release app on Heroku
+          run: heroku container:release web --app ${{ secrets.HEROKU_APP_NAME }}
+          env:
+            HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+            HEROKU_EMAIL: ${{ secrets.HEROKU_EMAIL }}
 
   # 📊 FIXED REPORT - CHỈ KIỂM TRA TRONG TAGS
   report:
