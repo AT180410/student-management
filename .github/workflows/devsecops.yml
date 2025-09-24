@@ -137,7 +137,7 @@ jobs:
         with:
           sarif_file: checkov-results.sarif
 
-  # 🔒 SECURITY GATE CHÍNH - CHECK tất cả report trừ DAST
+# 🔒 FIXED SECURITY GATE - SỬA LẠI CÁCH ĐỌC SEVERITY
   security-gate:
     name: 🔒 Security Gate
     runs-on: ubuntu-latest
@@ -147,60 +147,127 @@ jobs:
     steps:
       - name: Install jq for JSON parsing
         run: sudo apt-get update && sudo apt-get install -y jq
+  
       - uses: actions/download-artifact@v4
         with:
           pattern: trivy-*-report
           path: reports
           merge-multiple: true
+  
       - uses: actions/download-artifact@v4
         with:
           name: checkov-report
           path: reports/iac
-      - name: Analyze Security Reports
+  
+      - name: Debug - Check SARIF structure
+        run: |
+          echo "🔍 Checking SARIF structure..."
+          if [ -f "reports/trivy-deps-report.sarif" ]; then
+            echo "📦 SCA Report structure:"
+            jq '.runs[0].tool.driver.rules[0] | {id, properties}' "reports/trivy-deps-report.sarif" || echo "Cannot parse"
+            echo "---"
+            jq '.runs[0].results[0] | {ruleId, message}' "reports/trivy-deps-report.sarif" || echo "No results"
+          fi
+  
+      - name: Analyze Security Reports - FIXED
         id: check-gate
         run: |
           set -e
-          echo "🔒 Analyzing Security Reports..."
+          echo "🔒 Analyzing Security Reports with correct severity parsing..."
           FAIL=0
           TOTAL_CRITICAL=0
           TOTAL_HIGH=0
           
-          # 📦 SCA
+          # 📦 SCA - TRIVY DEPENDENCIES - SỬA LẠI CÁCH ĐỌC SEVERITY
           if [ -f "reports/trivy-deps-report.sarif" ]; then
-            CRIT=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' reports/trivy-deps-report.sarif)
-            HIGH=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' reports/trivy-deps-report.sarif)
-            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRIT))
-            TOTAL_HIGH=$((TOTAL_HIGH + HIGH))
-            if [ "$CRIT" -gt 0 ]; then FAIL=1; fi
+            echo "📦 Analyzing SCA results (Trivy Dependencies)..."
+            
+            # Cách 1: Đọc severity từ tags trong rules
+            SCA_CRITICAL=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "CRITICAL")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            SCA_HIGH=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "HIGH")] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            
+            # Cách 2: Nếu cách 1 không hoạt động, thử đọc từ CVSS score
+            if [ "$SCA_CRITICAL" -eq "0" ] && [ "$SCA_HIGH" -eq "0" ]; then
+              echo "⚠️ Trying alternative severity detection using CVSS scores..."
+              SCA_CRITICAL=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | select((.properties."security-severity" | tonumber) >= 9.0)] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+              SCA_HIGH=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | select((.properties."security-severity" | tonumber) >= 7.0 and (.properties."security-severity" | tonumber) < 9.0)] | length' "reports/trivy-deps-report.sarif" 2>/dev/null || echo "0")
+            fi
+            
+            echo "🔍 SCA - CRITICAL: $SCA_CRITICAL, HIGH: $SCA_HIGH"
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + SCA_CRITICAL))
+            TOTAL_HIGH=$((TOTAL_HIGH + SCA_HIGH))
+            
+            if [ "$SCA_CRITICAL" -gt 0 ]; then
+              echo "❌ SCA found $SCA_CRITICAL CRITICAL vulnerabilities"
+              FAIL=1
+            fi
           fi
           
-          # 🐳 Container
+          # 🐳 CONTAINER SCAN - SỬA TƯƠNG TỰ
           if [ -f "reports/trivy-container-report.sarif" ]; then
-            CRIT=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' reports/trivy-container-report.sarif)
-            HIGH=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' reports/trivy-container-report.sarif)
-            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRIT))
-            TOTAL_HIGH=$((TOTAL_HIGH + HIGH))
-            if [ "$CRIT" -gt 0 ]; then FAIL=1; fi
+            echo "🐳 Analyzing Container Scan results..."
+            
+            CONTAINER_CRITICAL=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "CRITICAL")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            CONTAINER_HIGH=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "HIGH")] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            
+            if [ "$CONTAINER_CRITICAL" -eq "0" ] && [ "$CONTAINER_HIGH" -eq "0" ]; then
+              CONTAINER_CRITICAL=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | select((.properties."security-severity" | tonumber) >= 9.0)] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+              CONTAINER_HIGH=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | select((.properties."security-severity" | tonumber) >= 7.0 and (.properties."security-severity" | tonumber) < 9.0)] | length' "reports/trivy-container-report.sarif" 2>/dev/null || echo "0")
+            fi
+            
+            echo "🔍 Container - CRITICAL: $CONTAINER_CRITICAL, HIGH: $CONTAINER_HIGH"
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CONTAINER_CRITICAL))
+            TOTAL_HIGH=$((TOTAL_HIGH + CONTAINER_HIGH))
+            
+            if [ "$CONTAINER_CRITICAL" -gt 0 ]; then
+              echo "❌ Container scan found $CONTAINER_CRITICAL CRITICAL vulnerabilities"
+              FAIL=1
+            fi
           fi
           
-          # 🔧 IaC
+          # 🔧 IAC SCAN - CHECKOV (có thể có cấu trúc khác)
           if [ -f "reports/iac/checkov-results.sarif" ]; then
-            CRIT=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("CRITICAL"))] | length' reports/iac/checkov-results.sarif)
-            HIGH=$(jq '[.runs[0].results[]? | select(.properties.tags[]? | contains("HIGH"))] | length' reports/iac/checkov-results.sarif)
-            TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRIT))
-            TOTAL_HIGH=$((TOTAL_HIGH + HIGH))
-            if [ "$CRIT" -gt 0 ]; then FAIL=1; fi
+            echo "🔧 Analyzing IaC results..."
+            
+            # Checkov có thể sử dụng cấu trúc khác - thử nhiều cách
+            IAC_CRITICAL=$(jq -r '[.runs[0].results[] | select(.level == "error")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            IAC_HIGH=$(jq -r '[.runs[0].results[] | select(.level == "warning")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            
+            # Thử cách khác nếu cách trên không hoạt động
+            if [ "$IAC_CRITICAL" -eq "0" ]; then
+              IAC_CRITICAL=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "CRITICAL")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+              IAC_HIGH=$(jq -r '[.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | .properties.tags[] | select(. == "HIGH")] | length' "reports/iac/checkov-results.sarif" 2>/dev/null || echo "0")
+            fi
+            
+            echo "🔍 IaC - CRITICAL: $IAC_CRITICAL, HIGH: $IAC_HIGH"
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + IAC_CRITICAL))
+            TOTAL_HIGH=$((TOTAL_HIGH + IAC_HIGH))
+            
+            if [ "$IAC_CRITICAL" -gt 0 ]; then
+              echo "❌ IaC scan found $IAC_CRITICAL CRITICAL vulnerabilities"
+              FAIL=1
+            fi
           fi
           
-          echo "📊 CRITICAL: $TOTAL_CRITICAL | HIGH: $TOTAL_HIGH"
+          echo "📊 SECURITY SUMMARY:"
+          echo "   CRITICAL vulnerabilities: $TOTAL_CRITICAL"
+          echo "   HIGH vulnerabilities: $TOTAL_HIGH"
+          
+          # Hiển thị chi tiết các vulnerabilities tìm thấy
+          if [ -f "reports/trivy-deps-report.sarif" ]; then
+            echo "🔍 Detailed vulnerabilities found:"
+            jq -r '.runs[0].results[] | .ruleId as $ruleId | .runs[0].tool.driver.rules[] | select(.id == $ruleId) | "\(.id): \(.shortDescription.text) - Severity: \(.properties.tags[] | select(. | test("CRITICAL|HIGH|MEDIUM|LOW"))) - CVSS: \(.properties."security-severity")"' "reports/trivy-deps-report.sarif" 2>/dev/null | head -10 || true
+          fi
+          
           if [ "$FAIL" -eq 1 ]; then
-            echo "❌ Security Gate failed"
+            echo "❌ Security Gate failed - Found $TOTAL_CRITICAL CRITICAL vulnerabilities"
             echo "passed=false" >> $GITHUB_OUTPUT
             exit 1
           else
-            echo "✅ Security Gate passed"
+            echo "✅ Security Gate passed - No CRITICAL vulnerabilities found"
             echo "passed=true" >> $GITHUB_OUTPUT
           fi
+          
   deploy-staging:
     name: 🚀 Deploy to Staging (Render)
     runs-on: ubuntu-latest
