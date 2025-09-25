@@ -38,21 +38,27 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v4
-      
+  
       - name: Setup Java for Maven
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
-      
+  
       - name: Build with Maven to generate dependencies
         run: |
           chmod +x ./mvnw
           ./mvnw -B compile dependency:tree
-          
+  
+      # Cache Trivy DB (reset mỗi run nhờ github.run_id)
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-sca-${{ github.run_id }}
+  
       - name: Run Trivy vulnerability scanner for dependencies
         uses: aquasecurity/trivy-action@master
-        id: trivy-deps
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -60,16 +66,15 @@ jobs:
           output: 'trivy-deps-report.sarif'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          trivy-config: |
-            reset: true
-            refresh: true
-
+          skip-db-update: false
+          skip-java-db-update: false
+  
       - name: Upload Trivy SCA report
         uses: actions/upload-artifact@v4
         with:
           name: trivy-deps-report
           path: trivy-deps-report.sarif
-
+  
       - name: Upload SARIF to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         with:
@@ -104,32 +109,39 @@ jobs:
             -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
 
   container-scan:
-    name: Container Scan (Trivy)
+    name: Container Scan (Trivy for Docker Image)
     runs-on: ubuntu-latest
     needs: build
     steps:
       - uses: actions/checkout@v4
-
+  
       - name: Build Docker image
         run: docker build -t student-management:latest .
-
+  
+      # Cache Trivy DB (reset mỗi run)
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-container-${{ github.run_id }}
+  
       - name: Run Trivy container scan
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: student-management:latest
-          format: sarif
-          output: trivy-container-report.sarif
+          format: 'sarif'
+          output: 'trivy-container-report.sarif'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          trivy-config: |
-            reset: true
-            refresh: true
-
-      - uses: actions/upload-artifact@v4
+          skip-db-update: false
+          skip-java-db-update: false
+  
+      - name: Upload Trivy Container report
+        uses: actions/upload-artifact@v4
         with:
           name: trivy-container-report
           path: trivy-container-report.sarif
-
+  
       - name: Upload SARIF to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         with:
