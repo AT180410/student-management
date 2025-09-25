@@ -1,40 +1,42 @@
 # ======================
 # Build stage
 # ======================
-FROM eclipse-temurin:21-jdk AS build
+FROM eclipse-temurin:21-jdk-jammy AS build
 WORKDIR /app
 
-# Copy source code vào container
+# Copy source code
 COPY . .
 
 # Build jar với Maven Wrapper
-RUN chmod +x ./mvnw && ./mvnw -B package -DskipTests
+RUN chmod +x ./mvnw && ./mvnw -B clean package -DskipTests
 
 
 # ======================
 # Runtime stage
 # ======================
-# Dùng JRE nhẹ hơn JDK để giảm size
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:21-jre-jammy
+
 WORKDIR /app
 
-# Cài curl cho healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# Update toàn bộ gói để vá CVE + cài curl
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy jar từ build stage
 COPY --from=build /app/target/*.jar app.jar
 
-# Tạo user không phải root
+# Tạo user không phải root để chạy app
 RUN useradd -ms /bin/bash appuser
 USER appuser
 
 # Expose cổng Spring Boot
 EXPOSE 8080
 
-# Thêm HEALTHCHECK để kiểm tra service
+# Healthcheck (Spring Boot Actuator)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -f http://localhost:8080/actuator/health || exit 1
 
-# Chạy app
+# Run app
 ENTRYPOINT ["java","-jar","app.jar"]
