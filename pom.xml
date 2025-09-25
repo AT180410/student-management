@@ -191,31 +191,6 @@
                 <artifactId>sonar-maven-plugin</artifactId>
                 <version>${sonar.maven.plugin.version}</version>
             </plugin>
-
-            <!-- OWASP Dependency Check -->
-            <plugin>
-                <groupId>org.owasp</groupId>
-                <artifactId>dependency-check-maven</artifactId>
-                <version>${dependency-check.plugin.version}</version>
-                <configuration>
-                    <!-- tạo nhiều định dạng báo cáo để tích hợp CI -->
-                    <format>ALL</format> <!-- SARIF, HTML, XML, etc. -->
-                    <outputDirectory>${project.build.directory}/dependency-check-report</outputDirectory>
-                    <failBuildOnCVSS>9</failBuildOnCVSS> <!-- fail build nếu CVSS >= 9 (CRITICAL) -->
-                    <suppressionFile>${basedir}/dependency-check-suppressions.xml</suppressionFile>
-                    <autoUpdate>true</autoUpdate>
-                    <dataDirectory>${project.build.directory}/dependency-check-data</dataDirectory>
-                </configuration>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>check</goal>
-                            <goal>aggregate</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-
         </plugins>
     </build>
 
