@@ -68,6 +68,7 @@ jobs:
           ignore-unfixed: true
           skip-db-update: false
           skip-java-db-update: false
+          trivyignores: .trivyignore
   
       - name: Upload Trivy SCA report
         uses: actions/upload-artifact@v4
@@ -135,6 +136,7 @@ jobs:
           ignore-unfixed: true
           skip-db-update: false
           skip-java-db-update: false
+          trivyignores: .trivyignore
   
       - name: Upload Trivy Container report
         uses: actions/upload-artifact@v4
