@@ -1,0 +1,2 @@
+# False positive - already patched in Tomcat 10.1.42 (Spring Boot backport)
+CVE-2025-24813
