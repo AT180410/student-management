@@ -50,7 +50,6 @@ jobs:
           chmod +x ./mvnw
           ./mvnw -B compile dependency:tree
   
-      # Cache Trivy DB (reset mỗi run nhờ github.run_id)
       - name: Cache Trivy DB
         uses: actions/cache@v4
         with:
@@ -66,8 +65,6 @@ jobs:
           output: 'trivy-deps-report.sarif'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          skip-db-update: false
-          skip-java-db-update: false
           trivyignores: .trivyignore
   
       - name: Upload Trivy SCA report
@@ -134,8 +131,6 @@ jobs:
           output: 'trivy-container-report.sarif'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          skip-db-update: false
-          skip-java-db-update: false
           trivyignores: .trivyignore
   
       - name: Upload Trivy Container report
