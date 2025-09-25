@@ -419,6 +419,12 @@ jobs:
   
       - name: Push Docker image to Heroku
         run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
+      - name: Ensure Heroku stack is container
+        run: heroku stack:set container -a ${{ secrets.HEROKU_APP_NAME }}
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          HEROKU_EMAIL: ${{ secrets.HEROKU_EMAIL }}
+
   
       - name: Release app on Heroku
         run: heroku container:release web --app ${{ secrets.HEROKU_APP_NAME }}
