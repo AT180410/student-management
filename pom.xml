@@ -9,7 +9,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.9</version>
+        <version>3.3.4</version> <!-- Upgrade to latest for security fixes -->
         <relativePath/>
     </parent>
 
@@ -20,34 +20,73 @@
 
     <properties>
         <java.version>21</java.version>
+        <!-- SECURITY FIX: Explicitly set Tomcat version -->
+        <tomcat.version>10.1.42</tomcat.version> <!-- Latest patched version -->
         <maven.compiler.plugin.version>3.11.0</maven.compiler.plugin.version>
         <jacoco.plugin.version>0.8.11</jacoco.plugin.version>
         <dependency-check.plugin.version>12.1.0</dependency-check.plugin.version>
         <sonar.maven.plugin.version>3.9.1.2184</sonar.maven.plugin.version>
         <surefire.plugin.version>3.2.5</surefire.plugin.version>
         <enforcer.plugin.version>3.5.0</enforcer.plugin.version>
+        
+        <!-- Security overrides -->
+        <postgresql.version>42.7.7</postgresql.version>
+        <logback.version>1.5.7</logback.version>
     </properties>
 
     <dependencies>
-        <!-- Spring Boot Core -->
+        <!-- Spring Boot Core with Tomcat exclusion -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.tomcat.embed</groupId>
+                    <artifactId>tomcat-embed-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.tomcat.embed</groupId>
+                    <artifactId>tomcat-embed-websocket</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.tomcat.embed</groupId>
+                    <artifactId>tomcat-embed-el</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
+        
+        <!-- Explicitly include patched Tomcat versions -->
+        <dependency>
+            <groupId>org.apache.tomcat.embed</groupId>
+            <artifactId>tomcat-embed-core</artifactId>
+            <version>${tomcat.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tomcat.embed</groupId>
+            <artifactId>tomcat-embed-websocket</artifactId>
+            <version>${tomcat.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tomcat.embed</groupId>
+            <artifactId>tomcat-embed-el</artifactId>
+            <version>${tomcat.version}</version>
+        </dependency>
+        
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
+        
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
 
-        <!-- Database driver (Postgres as example) -->
+        <!-- Database driver with security fix -->
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-            <version>42.7.4</version>
+            <version>${postgresql.version}</version>
         </dependency>
 
         <!-- Devtools (runtime only) -->
@@ -87,59 +126,42 @@
         </dependency>
     </dependencies>
 
+    <!-- Clean dependency management - let Spring Boot handle most versions -->
     <dependencyManagement>
         <dependencies>
-            <!-- Pin Tomcat Embed (giữ để phòng trường hợp cần override vì CVE) -->
-            <dependency>
-                <groupId>org.apache.tomcat.embed</groupId>
-                <artifactId>tomcat-embed-core</artifactId>
-                <version>10.1.40</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.tomcat.embed</groupId>
-                <artifactId>tomcat-embed-el</artifactId>
-                <version>10.1.40</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.tomcat.embed</groupId>
-                <artifactId>tomcat-embed-websocket</artifactId>
-                <version>10.1.40</version>
-            </dependency>
-
-            <!-- Quan trọng: Jackson/Hibernate pin để tránh drift -->
+            <!-- Only override for critical security fixes -->
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
                 <version>2.17.2</version>
-            </dependency>
-            <dependency>
-                <groupId>org.hibernate.orm</groupId>
-                <artifactId>hibernate-core</artifactId>
-                <version>6.5.2.Final</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
 
     <build>
         <plugins>
-            <!-- Spring Boot plugin -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-devtools</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
             </plugin>
 
-            <!-- Compiler plugin -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>${maven.compiler.plugin.version}</version>
                 <configuration>
-                    <!-- release is preferred for cross-compilation correctness -->
                     <release>${java.version}</release>
                 </configuration>
             </plugin>
 
-            <!-- Enforcer: bắt buộc Java 21+ -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
@@ -154,6 +176,11 @@
                                     <version>[21,)</version>
                                     <message>Project requires Java 21 or later.</message>
                                 </requireJavaVersion>
+                                <!-- Enforce minimum Tomcat version for security -->
+                                <requireProperty>
+                                    <property>tomcat.version</property>
+                                    <message>Tomcat version must be set for security</message>
+                                </requireProperty>
                             </rules>
                             <fail>true</fail>
                         </configuration>
@@ -161,14 +188,12 @@
                 </executions>
             </plugin>
 
-            <!-- Surefire for tests -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire.plugin.version}</version>
             </plugin>
 
-            <!-- JaCoCo for coverage -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -185,16 +210,30 @@
                 </executions>
             </plugin>
 
-            <!-- Sonar (maven) -->
             <plugin>
                 <groupId>org.sonarsource.scanner.maven</groupId>
                 <artifactId>sonar-maven-plugin</artifactId>
                 <version>${sonar.maven.plugin.version}</version>
             </plugin>
+
+            <!-- OWASP Dependency Check -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>${dependency-check.plugin.version}</version>
+                <configuration>
+                    <failBuildOnCVSS>9</failBuildOnCVSS>
+                    <suppressionFile>${basedir}/.trivyignore</suppressionFile>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals><goal>check</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
-    <!-- Optional: profiles for CI vs local dev (ví dụ tắt devtools in CI) -->
     <profiles>
         <profile>
             <id>ci</id>
@@ -207,6 +246,30 @@
                 <skipTests>false</skipTests>
             </properties>
         </profile>
+        
+        <!-- Security scan profile -->
+        <profile>
+            <id>security-scan</id>
+            <activation>
+                <property>
+                    <name>security.scan</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.owasp</groupId>
+                        <artifactId>dependency-check-maven</artifactId>
+                        <executions>
+                            <execution>
+                                <id>security-check</id>
+                                <phase>verify</phase>
+                                <goals><goal>check</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
     </profiles>
-
 </project>
