@@ -1,8 +1,7 @@
 # ======================
 # Build stage
 # ======================
-#FROM eclipse-temurin:21-jdk-jammy AS build
-FROM openjdk:8-jdk
+FROM eclipse-temurin:21-jdk-jammy AS build
 WORKDIR /app
 
 # Copy source code
