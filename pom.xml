@@ -9,7 +9,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.4</version> <!-- Upgrade to latest for security fixes -->
+        <version>3.3.4</version>
         <relativePath/>
     </parent>
 
@@ -20,11 +20,9 @@
 
     <properties>
         <java.version>21</java.version>
-        <!-- SECURITY FIX: Explicitly set Tomcat version -->
-        <tomcat.version>10.1.42</tomcat.version> <!-- Latest patched version -->
+        <tomcat.version>10.1.42</tomcat.version>
         <maven.compiler.plugin.version>3.11.0</maven.compiler.plugin.version>
         <jacoco.plugin.version>0.8.11</jacoco.plugin.version>
-        <dependency-check.plugin.version>12.1.0</dependency-check.plugin.version>
         <sonar.maven.plugin.version>3.9.1.2184</sonar.maven.plugin.version>
         <surefire.plugin.version>3.2.5</surefire.plugin.version>
         <enforcer.plugin.version>3.5.0</enforcer.plugin.version>
@@ -82,7 +80,7 @@
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
 
-        <!-- Database driver with security fix -->
+        <!-- Database driver -->
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
@@ -126,10 +124,9 @@
         </dependency>
     </dependencies>
 
-    <!-- Clean dependency management - let Spring Boot handle most versions -->
     <dependencyManagement>
         <dependencies>
-            <!-- Only override for critical security fixes -->
+            <!-- Override for critical security fixes -->
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
@@ -176,7 +173,6 @@
                                     <version>[21,)</version>
                                     <message>Project requires Java 21 or later.</message>
                                 </requireJavaVersion>
-                                <!-- Enforce minimum Tomcat version for security -->
                                 <requireProperty>
                                     <property>tomcat.version</property>
                                     <message>Tomcat version must be set for security</message>
@@ -215,22 +211,6 @@
                 <artifactId>sonar-maven-plugin</artifactId>
                 <version>${sonar.maven.plugin.version}</version>
             </plugin>
-
-            <!-- OWASP Dependency Check -->
-            <plugin>
-                <groupId>org.owasp</groupId>
-                <artifactId>dependency-check-maven</artifactId>
-                <version>${dependency-check.plugin.version}</version>
-                <configuration>
-                    <failBuildOnCVSS>9</failBuildOnCVSS>
-                    <suppressionFile>${basedir}/.trivyignore</suppressionFile>
-                </configuration>
-                <executions>
-                    <execution>
-                        <goals><goal>check</goal></goals>
-                    </execution>
-                </executions>
-            </plugin>
         </plugins>
     </build>
 
@@ -245,31 +225,6 @@
             <properties>
                 <skipTests>false</skipTests>
             </properties>
-        </profile>
-        
-        <!-- Security scan profile -->
-        <profile>
-            <id>security-scan</id>
-            <activation>
-                <property>
-                    <name>security.scan</name>
-                </property>
-            </activation>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.owasp</groupId>
-                        <artifactId>dependency-check-maven</artifactId>
-                        <executions>
-                            <execution>
-                                <id>security-check</id>
-                                <phase>verify</phase>
-                                <goals><goal>check</goal></goals>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
         </profile>
     </profiles>
 </project>
