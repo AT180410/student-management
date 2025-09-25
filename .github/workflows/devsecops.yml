@@ -50,9 +50,6 @@ jobs:
           chmod +x ./mvnw
           ./mvnw -B compile dependency:tree
           
-      - name: Clean Trivy cache
-        run: trivy clean  
-
       - name: Run Trivy vulnerability scanner for dependencies
         uses: aquasecurity/trivy-action@master
         id: trivy-deps
@@ -63,9 +60,9 @@ jobs:
           output: 'trivy-deps-report.sarif'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          exit-code: 0
           trivy-config: |
-            refresh: true   
+            reset: true
+            refresh: true
 
       - name: Upload Trivy SCA report
         uses: actions/upload-artifact@v4
@@ -112,11 +109,9 @@ jobs:
     needs: build
     steps:
       - uses: actions/checkout@v4
+
       - name: Build Docker image
         run: docker build -t student-management:latest .
-      
-      - name: Clean Trivy cache
-        run: trivy clean   # 👈 Thêm bước xóa cache
 
       - name: Run Trivy container scan
         uses: aquasecurity/trivy-action@master
@@ -124,10 +119,11 @@ jobs:
           image-ref: student-management:latest
           format: sarif
           output: trivy-container-report.sarif
-          severity: CRITICAL,HIGH
+          severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
           trivy-config: |
-            refresh: true   
+            reset: true
+            refresh: true
 
       - uses: actions/upload-artifact@v4
         with:
