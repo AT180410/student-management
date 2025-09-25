@@ -329,17 +329,15 @@ jobs:
         run: |
           echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
   
-      - name: Trigger Render Deploy (use Authorization header)
-        env:
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-          SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID_TEST }}
+      - name: 🚀 Trigger Render deploy
         run: |
-          echo "🚀 Triggering Render deploy for service: $SERVICE_ID"
-          curl --silent --show-error --fail -X POST \
-            "https://api.render.com/v1/services/${SERVICE_ID}/deploys" \
-            -H "Authorization: Bearer ${RENDER_API_KEY}" \
-            -H "Accept: application/json"
-  
+          echo "🚀 Triggering Render deploy for service: ${{ secrets.RENDER_SERVICE_ID }}"
+          curl -X POST "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys" \
+            -H "Accept: application/json" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
+
       - name: Wait for deployment to be ready
         run: |
           TARGET=${{ steps.set-url.outputs.url }}
