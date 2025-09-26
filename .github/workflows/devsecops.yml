@@ -356,15 +356,18 @@ jobs:
     needs: deploy-staging
     if: github.ref == 'refs/heads/test' && needs.deploy-staging.result == 'success'
     timeout-minutes: 30
+    env:
+      APP_URL: ${{ secrets.APP_URL_STAGING }}   # 👈 chỉ dùng 1 biến
+
     steps:
       - uses: actions/checkout@v4
   
       - name: Wait for application to be ready
         run: |
-          echo "Waiting for staging application ..."
+          echo "Waiting for staging application at $APP_URL ..."
           for i in {1..30}; do
-            if curl --silent --fail "${{ secrets.APP_URL_STAGING }}/actuator/health" > /dev/null; then
-              echo "✅ Application is ready "
+            if curl --silent --fail "$APP_URL/actuator/health" > /dev/null; then
+              echo "✅ Application is ready"
               exit 0
             fi
             echo "⏳ Attempt $i: Application not ready yet, waiting 10 seconds..."
@@ -372,16 +375,14 @@ jobs:
           done
           echo "❌ Application failed to become ready within timeout"
           exit 1
-        env:
-          APP_URL: ${{ secrets.APP_URL_STAGING }}
   
       - name: Run ZAP Baseline Scan
         run: |
-          echo "🚀 Starting ZAP scan against..."
+          echo "🚀 Starting ZAP scan against $APP_URL ..."
           set +e
           docker run --rm -v $(pwd):/zap/wrk:rw \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t "$APP_URL_STAGING" \
+            -t "$APP_URL" \
             -a \
             -m 10 \
             -T 180 \
