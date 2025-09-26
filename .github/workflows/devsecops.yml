@@ -662,7 +662,7 @@ jobs:
         id: status
         run: |
           overall="SUCCESS"
-          for job in sast sca container-scan iac-scan dast deploy-staging deploy-production report; do
+          for job in sast sca container-scan iac-scan security-gate dast deploy-staging deploy-production report; do
             result="${{ needs[job].result }}"
             echo "$job => $result"
             if [ "$result" = "failure" ]; then
