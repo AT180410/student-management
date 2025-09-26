@@ -662,14 +662,19 @@ jobs:
         id: status
         run: |
           overall="SUCCESS"
-          for job in sast sca container-scan iac-scan security-gate dast deploy-staging deploy-production report; do
-            result="${{ needs[job].result }}"
-            echo "$job => $result"
-            if [ "$result" = "failure" ]; then
-              overall="FAILED"
-              break
-            fi
-          done
+  
+          if [ "${{ needs.sast.result }}" = "failure" ] || \
+             [ "${{ needs.sca.result }}" = "failure" ] || \
+             [ "${{ needs.container-scan.result }}" = "failure" ] || \
+             [ "${{ needs.iac-scan.result }}" = "failure" ] || \
+             [ "${{ needs.dast.result }}" = "failure" ] || \
+             [ "${{ needs.security-gate.result }}" = "failure" ] || \
+             [ "${{ needs.deploy-staging.result }}" = "failure" ] || \
+             [ "${{ needs.deploy-production.result }}" = "failure" ] || \
+             [ "${{ needs.report.result }}" = "failure" ]; then
+               overall="FAILED"
+          fi
+  
           echo "overall=$overall" >> $GITHUB_OUTPUT
   
       - name: 📢 Gửi kết quả lên Discord
@@ -692,4 +697,3 @@ jobs:
             **Production Deploy:** ${{ needs.deploy-production.result }}
             **Report:** ${{ needs.report.result }}
   
-            🚨 Hãy kiểm tra logs chi tiết trong GitHub Actions nếu có lỗi.
