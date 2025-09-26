@@ -658,6 +658,19 @@ jobs:
     needs: [sast, sca, container-scan, iac-scan, dast, deploy-staging, deploy-production, report]
     if: always()
     steps:
+      - name: 📊 Build pipeline status
+        id: status
+        run: |
+          overall="SUCCESS"
+          for job in sast sca container-scan iac-scan dast deploy-staging deploy-production report; do
+            result="${{ needs[job].result }}"
+            if [ "$result" = "failure" ]; then
+              overall="FAILED"
+              break
+            fi
+          done
+          echo "overall=$overall" >> $GITHUB_OUTPUT
+  
       - name: 📢 Send Pipeline Result
         uses: Ilshidur/action-discord@master
         env:
@@ -666,7 +679,7 @@ jobs:
           args: |
             📢 **Pipeline Result** cho `${{ github.repository }}`
             🔀 Branch: `${{ github.ref_name }}`
-            📌 Trạng thái tổng thể: **${{ job.status }}**
+            📌 Trạng thái tổng thể: **${{ steps.status.outputs.overall }}**
   
             **SAST:** ${{ needs.sast.result == 'success' && '✅ SUCCESS' || needs.sast.result == 'failure' && '❌ FAILED' || '⚪ SKIPPED' }}
             **SCA:** ${{ needs.sca.result == 'success' && '✅ SUCCESS' || needs.sca.result == 'failure' && '❌ FAILED' || '⚪ SKIPPED' }}
@@ -678,4 +691,3 @@ jobs:
             **Report:** ${{ needs.report.result == 'success' && '✅ SUCCESS' || needs.report.result == 'failure' && '❌ FAILED' || '⚪ SKIPPED' }}
   
             🚨 Hãy kiểm tra logs chi tiết trong GitHub Actions nếu có lỗi.
-  
