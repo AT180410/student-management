@@ -655,7 +655,7 @@ jobs:
   notify:
     name: 📢 Notify Discord
     runs-on: ubuntu-latest
-    needs: [sast, sca, container-scan, iac-scan, dast, deploy-staging, deploy-production, report]
+    needs: [sast, sca, container-scan, iac-scan, dast, security-gate, deploy-staging, deploy-production, report]
     if: always()
     steps:
       - name: 📊 Tính trạng thái tổng thể
@@ -687,6 +687,7 @@ jobs:
             **Container:** ${{ needs.container-scan.result }}
             **IaC:** ${{ needs.iac-scan.result }}
             **DAST:** ${{ needs.dast.result }}
+            **Security Gate:** ${{ needs.security-gate.result }}
             **Staging Deploy:** ${{ needs.deploy-staging.result }}
             **Production Deploy:** ${{ needs.deploy-production.result }}
             **Report:** ${{ needs.report.result }}
