@@ -366,19 +366,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
   
-      - name: Wait for application to be ready
+      - name: Wait for staging app to be ready
         run: |
           APP_URL="${{ needs.deploy-staging.outputs.url }}"
-          echo "Waiting for staging application at $APP_URL ..."
+          echo "⏳ Waiting for staging application at $APP_URL ..."
           for i in {1..30}; do
             if curl --silent --fail "$APP_URL/actuator/health" > /dev/null; then
               echo "✅ Application is ready at $APP_URL"
               exit 0
             fi
-            echo "⏳ Attempt $i: Application not ready yet, waiting 10 seconds..."
+            echo "Attempt $i/30: App not ready yet, waiting 10s..."
             sleep 10
           done
-          echo "❌ Application failed to become ready within timeout"
+          echo "❌ Application failed to become ready within 5 minutes"
           exit 1
   
       - name: Run ZAP Baseline Scan
@@ -398,14 +398,15 @@ jobs:
             | tee zap-console.log
           EXIT_CODE=$?
           echo "ZAP finished with exit code: $EXIT_CODE"
-          echo "🔎 Filtering only High/Critical alerts..."
+  
+          echo "🔎 Checking for High/Critical vulnerabilities..."
           if grep -E "High|Critical" zap-console.log; then
             echo "❌ High or Critical vulnerabilities found!"
             exit 1
           fi
           set -e
   
-      - name: Upload ZAP Report
+      - name: Upload ZAP Reports
         uses: actions/upload-artifact@v4
         with:
           name: zap-dast-report
