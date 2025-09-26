@@ -338,9 +338,6 @@ jobs:
   
       - name: Push Docker image to Heroku
         run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME_STAGING }}/web
-        
-      - name: Set Heroku stack to container
-        run: heroku stack:set container -a ${{ secrets.HEROKU_APP_NAME_STAGING }}
 
       - name: Release app on Heroku
         env:
