@@ -365,13 +365,14 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
+  
       - name: Wait for application to be ready
         run: |
-          echo "Waiting for staging application to be ready..."
+          APP_URL="${{ needs.deploy-staging.outputs.url }}"
+          echo "Waiting for staging application at $APP_URL ..."
           for i in {1..30}; do
-            if curl --silent --fail ${{ needs.deploy-staging.outputs.url }}/actuator/health > /dev/null; then
-              echo "✅ Application is ready!"
+            if curl --silent --fail "$APP_URL/actuator/health" > /dev/null; then
+              echo "✅ Application is ready at $APP_URL"
               exit 0
             fi
             echo "⏳ Attempt $i: Application not ready yet, waiting 10 seconds..."
@@ -379,20 +380,40 @@ jobs:
           done
           echo "❌ Application failed to become ready within timeout"
           exit 1
-      - name: Run ZAP Baseline Scan (console only)
+  
+      - name: Run ZAP Baseline Scan
         run: |
-          echo "🚀 Starting ZAP scan against: ${{ needs.deploy-staging.outputs.url }}"
+          APP_URL="${{ needs.deploy-staging.outputs.url }}"
+          echo "🚀 Starting ZAP scan against: $APP_URL"
           set +e
-          docker run --rm \
+          docker run --rm -v $(pwd):/zap/wrk:rw \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t "${{ needs.deploy-staging.outputs.url }}" \
+            -t "$APP_URL" \
             -a \
             -m 10 \
-            -T 180 | tee zap-console.log
-          echo "ZAP finished with exit code: $?"
-          echo "🔎 Filtering only ALERTS and FAILURES..."
-          grep -E "ALERT|FAIL" zap-console.log || true
+            -T 180 \
+            -r zap-report.html \
+            -w zap-report.md \
+            -J zap-report.json \
+            | tee zap-console.log
+          EXIT_CODE=$?
+          echo "ZAP finished with exit code: $EXIT_CODE"
+          echo "🔎 Filtering only High/Critical alerts..."
+          if grep -E "High|Critical" zap-console.log; then
+            echo "❌ High or Critical vulnerabilities found!"
+            exit 1
+          fi
           set -e
+  
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-dast-report
+          path: |
+            zap-report.html
+            zap-report.md
+            zap-report.json
+            zap-console.log
 
   deploy-production:
     name: 🚀 Deploy to Production (Heroku Docker)
