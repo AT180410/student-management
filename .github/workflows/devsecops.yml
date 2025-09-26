@@ -653,39 +653,43 @@ jobs:
           path: reports/final/security-report.html
 
   notify:
-    name: 📢 Notify Discord
-    runs-on: ubuntu-latest
-    needs: [deploy-staging, deploy-production, report]
-    if: always()
-    steps:
-      - name: ✅ Notify Success
-        if: ${{ success() }}
-        uses: Ilshidur/action-discord@master
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        with:
-          args: |
-            ✅ **Pipeline SUCCESS** cho ${{ github.repository }}
-            🔀 Branch: ${{ github.ref_name }}
-            📌 Status: **SUCCESS**
-            **SAST:** ${{ needs.sast.result }}
-            **SCA:** ${{ needs.sca.result }}
-            **Container:** ${{ needs.container-scan.result }}
-            **IaC:** ${{ needs.iac-scan.result }}
-            **DAST:** ${{ needs.dast.result }}
-      - name: ❌ Notify Failure
-        if: ${{ failure() }}
-        uses: Ilshidur/action-discord@master
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        with:
-          args: |
-            ❌ **Pipeline FAILED** cho ${{ github.repository }}
-            🔀 Branch: ${{ github.ref_name }}
-            📌 Status: **FAILED**
-            **SAST:** ${{ needs.sast.result }}
-            **SCA:** ${{ needs.sca.result }}
-            **Container:** ${{ needs.container-scan.result }}
-            **IaC:** ${{ needs.iac-scan.result }}
-            **DAST:** ${{ needs.dast.result }}
-            🚨 Hãy kiểm tra lại logs chi tiết trong GitHub Action
+      name: 📢 Notify Discord
+      runs-on: ubuntu-latest
+      needs: [deploy-staging, deploy-production, report, sast, sca, container-scan, iac-scan, dast]
+      if: always()
+      steps:
+        - name: ❌ Notify Failure
+          if: contains(join(needs.*.result, ','), 'failure')
+          uses: Ilshidur/action-discord@master
+          env:
+            DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          with:
+            args: |
+              ❌ **Pipeline FAILED** cho ${{ github.repository }}
+              🔀 Branch: ${{ github.ref_name }}
+              📌 Status: **FAILED**
+              **SAST:** ${{ needs.sast.result }}
+              **SCA:** ${{ needs.sca.result }}
+              **Container:** ${{ needs.container-scan.result }}
+              **IaC:** ${{ needs.iac-scan.result }}
+              **DAST:** ${{ needs.dast.result }}
+              **Deploy Staging:** ${{ needs.deploy-staging.result }}
+              **Deploy Production:** ${{ needs.deploy-production.result }}
+    
+        - name: ✅ Notify Success
+          if: "contains(join(needs.*.result, ','), 'failure')"
+          uses: Ilshidur/action-discord@master
+          env:
+            DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          with:
+            args: |
+              ✅ **Pipeline SUCCESS** cho ${{ github.repository }}
+              🔀 Branch: ${{ github.ref_name }}
+              📌 Status: **SUCCESS**
+              **SAST:** ${{ needs.sast.result }}
+              **SCA:** ${{ needs.sca.result }}
+              **Container:** ${{ needs.container-scan.result }}
+              **IaC:** ${{ needs.iac-scan.result }}
+              **DAST:** ${{ needs.dast.result }}
+              **Deploy Staging:** ${{ needs.deploy-staging.result }}
+              **Deploy Production:** ${{ needs.deploy-production.result }}
