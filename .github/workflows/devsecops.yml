@@ -350,9 +350,6 @@ jobs:
           echo "🚀 Releasing staging app on Heroku..."
           heroku container:release web --app "$HEROKU_APP_NAME_STAGING"
   
-      - name: Export APP_URL
-        run: echo "APP_URL=https://${{ secrets.HEROKU_APP_NAME_STAGING }}.herokuapp.com" >> $GITHUB_ENV
-  
   dast:
     name: 🛡️ DAST (OWASP ZAP)
     runs-on: ubuntu-latest
@@ -376,7 +373,7 @@ jobs:
           echo "❌ Application failed to become ready within timeout"
           exit 1
         env:
-          APP_URL: ${{ env.APP_URL }}
+          APP_URL: ${{ secrets.APP_URL_STAGING }}
   
       - name: Run ZAP Baseline Scan
         run: |
@@ -401,7 +398,7 @@ jobs:
           fi
           set -e
         env:
-          APP_URL: ${{ env.APP_URL }}
+          APP_URL: ${{ secrets.APP_URL_STAGING }}
   
       - name: Upload ZAP Report
         uses: actions/upload-artifact@v4
