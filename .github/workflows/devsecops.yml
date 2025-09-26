@@ -330,13 +330,20 @@ jobs:
           echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
   
       - name: 🚀 Trigger Render deploy
+        env:
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
         run: |
-          echo "🚀 Triggering Render deploy for service: ${{ secrets.RENDER_SERVICE_ID }}"
-          curl -X POST "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys" \
+          if [ -z "$RENDER_SERVICE_ID" ]; then
+            echo "❌ RENDER_SERVICE_ID is not set. Please configure it in GitHub Secrets."
+            exit 1
+          fi
+          echo "🚀 Triggering Render deploy..."
+          curl -sSf -X POST "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
             -H "Accept: application/json" \
-            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d '{}'
+            -d '{}' > /dev/null
 
       - name: Wait for deployment to be ready
         run: |
@@ -412,18 +419,20 @@ jobs:
   
       - name: Push Docker image to Heroku
         run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
-      # - name: Ensure Heroku stack is container
-      #   run: heroku stack:set container -a ${{ secrets.HEROKU_APP_NAME }}
-      #   env:
-      #     HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-      #     HEROKU_EMAIL: ${{ secrets.HEROKU_EMAIL }}
-
-  
+        
       - name: Release app on Heroku
-        run: heroku container:release web --app ${{ secrets.HEROKU_APP_NAME }}
         env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}`
           HEROKU_EMAIL: ${{ secrets.HEROKU_EMAIL }}
+          HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
+        run: |
+          if [ -z "$HEROKU_APP_NAME" ]; then
+            echo "❌ HEROKU_APP_NAME is not set. Please configure it in GitHub Secrets."
+            exit 1
+          fi
+          echo "🚀 Releasing app on Heroku..."
+          heroku container:release web --app "$HEROKU_APP_NAME"
+
 
   # 📊 FIXED REPORT - CORRECT SEVERITY DISPLAY
   report:
