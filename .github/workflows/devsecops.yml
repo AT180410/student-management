@@ -361,10 +361,10 @@ jobs:
   
       - name: Wait for application to be ready
         run: |
-          echo "Waiting for staging application at $APP_URL_STAGING ..."
+          echo "Waiting for staging application ..."
           for i in {1..30}; do
-            if curl --silent --fail "$APP_URLSTAGING/actuator/health" > /dev/null; then
-              echo "✅ Application is ready at $APP_URL"
+            if curl --silent --fail "${{ secrets.APP_URL_STAGING }}/actuator/health" > /dev/null; then
+              echo "✅ Application is ready "
               exit 0
             fi
             echo "⏳ Attempt $i: Application not ready yet, waiting 10 seconds..."
@@ -377,7 +377,7 @@ jobs:
   
       - name: Run ZAP Baseline Scan
         run: |
-          echo "🚀 Starting ZAP scan against: $APP_URL_STAGING"
+          echo "🚀 Starting ZAP scan against..."
           set +e
           docker run --rm -v $(pwd):/zap/wrk:rw \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
@@ -397,8 +397,6 @@ jobs:
             exit 1
           fi
           set -e
-        env:
-          APP_URL: ${{ secrets.APP_URL_STAGING }}
   
       - name: Upload ZAP Report
         uses: actions/upload-artifact@v4
