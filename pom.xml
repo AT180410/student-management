@@ -132,15 +132,6 @@
                 <artifactId>jackson-databind</artifactId>
                 <version>2.17.2</version>
             </dependency>
-    <!-- Fake dependency chỉ để tạo CVE -->
-             <dependency>
-               <groupId>commons-collections</groupId>
-               <artifactId>commons-collections</artifactId>
-               <version>3.2.1</version> <!-- Bị nhiều CVE critical -->
-               <scope>import</scope>
-               <optional>true</optional>
-             </dependency>
-
         </dependencies>
     </dependencyManagement>
 
