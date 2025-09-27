@@ -369,7 +369,7 @@ jobs:
         run: |
           echo "Waiting for Heroku app at $APP_URL ..."
           for i in {1..30}; do
-            if curl --silent --fail "$APP_URL" > /dev/null; then
+            if curl --silent --fail "$APP_URL/actuator/health" > /dev/null; then
               echo "✅ Application is ready"
               exit 0
             fi
