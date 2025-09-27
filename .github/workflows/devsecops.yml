@@ -358,7 +358,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
+  
       - name: Wait for application to be ready
         run: |
           echo "Waiting for Heroku app at $APP_URL ..."
@@ -374,7 +374,7 @@ jobs:
           exit 1
         env:
           APP_URL: ${{ secrets.APP_URL_STAGING }}
-
+  
       - name: Run ZAP Baseline Scan
         run: |
           echo "🚀 Starting ZAP scan against $APP_URL ..."
@@ -399,7 +399,7 @@ jobs:
           set -e
         env:
           APP_URL: ${{ secrets.APP_URL_STAGING }}
-
+  
       - name: Upload ZAP Report
         uses: actions/upload-artifact@v4
         with:
