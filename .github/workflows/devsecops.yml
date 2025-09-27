@@ -317,49 +317,39 @@ jobs:
           fi
           
   deploy-staging:
-    name: 🚀 Deploy to Staging (Render)
+    name: 🚀 Deploy to Staging (Heroku Docker)
     runs-on: ubuntu-latest
     needs: security-gate
     if: github.ref == 'refs/heads/test' && needs.security-gate.outputs.passed == 'true'
-    outputs:
-      url: ${{ steps.set-url.outputs.url }}
     steps:
-      - name: Set environment URL
-        id: set-url
-        run: |
-          echo "url=https://student-management-test-vrfb.onrender.com" >> $GITHUB_OUTPUT
+      - uses: actions/checkout@v4
   
-      - name: 🚀 Trigger Render deploy
-        env:
-          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      - name: Install Heroku CLI
         run: |
-          if [ -z "$RENDER_SERVICE_ID" ]; then
-            echo "❌ RENDER_SERVICE_ID is not set. Please configure it in GitHub Secrets."
+          curl https://cli-assets.heroku.com/install.sh | sh
+  
+      - name: Log in to Heroku Container Registry
+        run: echo "${{ secrets.HEROKU_API_KEY }}" | docker login --username=_ --password-stdin registry.heroku.com
+  
+      - name: Build Docker image
+        run: docker build -t registry.heroku.com/${{ secrets.HEROKU_APP_NAME_STAGING }}/web .
+  
+      - name: Push Docker image to Heroku
+        run: docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME_STAGING }}/web
+  
+      - name: Release app on Heroku
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          HEROKU_EMAIL: ${{ secrets.HEROKU_EMAIL }}
+          HEROKU_APP_NAME_STAGING: ${{ secrets.HEROKU_APP_NAME_STAGING }}
+        run: |
+          if [ -z "$HEROKU_APP_NAME_STAGING" ]; then
+            echo "❌ HEROKU_APP_NAME_STAGING is not set. Please configure it in GitHub Secrets."
             exit 1
           fi
-          echo "🚀 Triggering Render deploy..."
-          curl -sSf -X POST "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
-            -H "Accept: application/json" \
-            -H "Authorization: Bearer ${RENDER_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d '{}' > /dev/null
-
-      - name: Wait for deployment to be ready
-        run: |
-          TARGET=${{ steps.set-url.outputs.url }}
-          echo "⏳ Waiting for $TARGET to become healthy..."
-          for i in {1..20}; do
-            if curl --silent --fail "$TARGET/actuator/health" > /dev/null; then
-              echo "✅ Application is healthy and ready!"
-              exit 0
-            fi
-            echo "Attempt $i/20: not ready yet, retrying in 10s..."
-            sleep 10
-          done
-          echo "❌ Application failed to start within timeout"
-          exit 1
-
+          echo "🚀 Releasing staging app on Heroku..."
+          heroku container:release web --app "$HEROKU_APP_NAME_STAGING"
+  
   dast:
     name: 🛡️ DAST (OWASP ZAP)
     runs-on: ubuntu-latest
@@ -368,13 +358,19 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
+  
+      - name: Debug APP_URL_STAGING
+        run: |
+          echo "🔍 APP_URL_STAGING = $APP_URL"
+        env:
+          APP_URL: ${{ secrets.APP_URL_STAGING }}
+  
       - name: Wait for application to be ready
         run: |
-          echo "Waiting for staging application to be ready..."
+          echo "Waiting for Heroku app at $APP_URL ..."
           for i in {1..30}; do
-            if curl --silent --fail ${{ needs.deploy-staging.outputs.url }}/actuator/health > /dev/null; then
-              echo "✅ Application is ready!"
+            if curl --silent --fail "$APP_URL/actuator/health" > /dev/null; then
+              echo "✅ Application is ready"
               exit 0
             fi
             echo "⏳ Attempt $i: Application not ready yet, waiting 10 seconds..."
@@ -382,20 +378,43 @@ jobs:
           done
           echo "❌ Application failed to become ready within timeout"
           exit 1
-      - name: Run ZAP Baseline Scan (console only)
+        env:
+          APP_URL: ${{ secrets.APP_URL_STAGING }}
+  
+      - name: Run ZAP Baseline Scan
         run: |
-          echo "🚀 Starting ZAP scan against: ${{ needs.deploy-staging.outputs.url }}"
+          echo "🚀 Starting ZAP scan against $APP_URL ..."
           set +e
-          docker run --rm \
+          docker run --rm -v $(pwd):/zap/wrk:rw \
             ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
-            -t "${{ needs.deploy-staging.outputs.url }}" \
+            -t "$APP_URL" \
             -a \
             -m 10 \
-            -T 180 | tee zap-console.log
-          echo "ZAP finished with exit code: $?"
-          echo "🔎 Filtering only ALERTS and FAILURES..."
-          grep -E "ALERT|FAIL" zap-console.log || true
+            -T 300 \
+            -r zap-report.html \
+            -w zap-report.md \
+            -J zap-report.json \
+            | tee zap-console.log
+          EXIT_CODE=$?
+          echo "ZAP finished with exit code: $EXIT_CODE"
+          echo "🔎 Filtering only High/Critical alerts..."
+          if grep -E "High|Critical" zap-console.log; then
+            echo "❌ High or Critical vulnerabilities found!"
+            exit 1
+          fi
           set -e
+        env:
+          APP_URL: ${{ secrets.APP_URL_STAGING }}
+  
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-dast-report
+          path: |
+            zap-report.html
+            zap-report.md
+            zap-report.json
+            zap-console.log
 
   deploy-production:
     name: 🚀 Deploy to Production (Heroku Docker)
@@ -655,37 +674,45 @@ jobs:
   notify:
     name: 📢 Notify Discord
     runs-on: ubuntu-latest
-    needs: [deploy-staging, deploy-production, report]
+    needs: [sast, sca, container-scan, iac-scan, dast, security-gate, deploy-staging, deploy-production, report]
     if: always()
     steps:
-      - name: ✅ Notify Success
-        if: ${{ success() }}
+      - name: 📊 Tính trạng thái tổng thể
+        id: status
+        run: |
+          overall="SUCCESS"
+  
+          if [ "${{ needs.sast.result }}" = "failure" ] || \
+             [ "${{ needs.sca.result }}" = "failure" ] || \
+             [ "${{ needs.container-scan.result }}" = "failure" ] || \
+             [ "${{ needs.iac-scan.result }}" = "failure" ] || \
+             [ "${{ needs.dast.result }}" = "failure" ] || \
+             [ "${{ needs.security-gate.result }}" = "failure" ] || \
+             [ "${{ needs.deploy-staging.result }}" = "failure" ] || \
+             [ "${{ needs.deploy-production.result }}" = "failure" ] || \
+             [ "${{ needs.report.result }}" = "failure" ]; then
+               overall="FAILED"
+          fi
+  
+          echo "overall=$overall" >> $GITHUB_OUTPUT
+  
+      - name: 📢 Gửi kết quả lên Discord
         uses: Ilshidur/action-discord@master
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         with:
           args: |
-            ✅ **Pipeline SUCCESS** cho ${{ github.repository }}
-            🔀 Branch: ${{ github.ref_name }}
-            📌 Status: **SUCCESS**
+            📢 **Pipeline Result** cho `${{ github.repository }}`
+            🔀 Branch: `${{ github.ref_name }}`
+            📌 Trạng thái tổng thể: **${{ steps.status.outputs.overall }}**
+  
             **SAST:** ${{ needs.sast.result }}
             **SCA:** ${{ needs.sca.result }}
             **Container:** ${{ needs.container-scan.result }}
             **IaC:** ${{ needs.iac-scan.result }}
             **DAST:** ${{ needs.dast.result }}
-      - name: ❌ Notify Failure
-        if: ${{ failure() }}
-        uses: Ilshidur/action-discord@master
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        with:
-          args: |
-            ❌ **Pipeline FAILED** cho ${{ github.repository }}
-            🔀 Branch: ${{ github.ref_name }}
-            📌 Status: **FAILED**
-            **SAST:** ${{ needs.sast.result }}
-            **SCA:** ${{ needs.sca.result }}
-            **Container:** ${{ needs.container-scan.result }}
-            **IaC:** ${{ needs.iac-scan.result }}
-            **DAST:** ${{ needs.dast.result }}
-            🚨 Hãy kiểm tra lại logs chi tiết trong GitHub Action
+            **Security Gate:** ${{ needs.security-gate.result }}
+            **Staging Deploy:** ${{ needs.deploy-staging.result }}
+            **Production Deploy:** ${{ needs.deploy-production.result }}
+            **Report:** ${{ needs.report.result }}
+  
