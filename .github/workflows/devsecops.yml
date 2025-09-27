@@ -470,7 +470,7 @@ jobs:
              [ "${{ needs.dast.result }}" = "failure" ] || \
              [ "${{ needs.security-gate.result }}" = "failure" ] || \
              [ "${{ needs.deploy-staging.result }}" = "failure" ] || \
-             [ "${{ needs.deploy-production.result }}" = "failure" ] ||; then
+             [ "${{ needs.deploy-production.result }}" = "failure" ]; then
                overall="FAILED"
           fi
   
