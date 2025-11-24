@@ -24,7 +24,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-# ✅ Thêm lib cũ có CVE cho Trivy detect (không ảnh hưởng app)
+# ✅ Thêm lib cũ có CVE cho Trivy detect 
 # RUN mkdir -p /app/vulnerable-libs \
 #     && curl -L -o /app/vulnerable-libs/jackson-databind-2.9.5.jar \
 #        https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-databind/2.9.5/jackson-databind-2.9.5.jar
