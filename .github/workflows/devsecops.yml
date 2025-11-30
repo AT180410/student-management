@@ -414,9 +414,6 @@ jobs:
         with:
           name: zap-dast-report
           path: |
-            zap-report.html
-            zap-report.md
-            zap-report.json
             zap-console.log
 
   deploy-production:
