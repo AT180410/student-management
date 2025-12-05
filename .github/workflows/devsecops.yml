@@ -107,7 +107,7 @@ jobs:
             -Dsonar.sources=src/main/java,src/main/resources \
             -Dsonar.tests=src/test/java \
             -Dsonar.junit.reportPaths=target/surefire-reports \
-            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml\
             -Dsonar.qualitygate.wait=true
 
   container-scan:
