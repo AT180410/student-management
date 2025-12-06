@@ -120,7 +120,7 @@ jobs:
       - name: Build Docker image
         run: docker build -t student-management:latest .
   
-      # Cache Trivy DB (reset mỗi run)
+      # Cache Trivy DB 
       - name: Cache Trivy DB
         uses: actions/cache@v4
         with:
@@ -172,7 +172,7 @@ jobs:
         with:
           sarif_file: checkov-results.sarif
 
-# 🔒 FIXED SECURITY GATE - CORRECT SEVERITY PARSING
+# 🔒SECURITY GATE - CORRECT SEVERITY PARSING
   security-gate:
     name: 🔒 Security Gate
     runs-on: ubuntu-latest
@@ -210,13 +210,12 @@ jobs:
         id: check-gate
         run: |
           set -e
-          echo "🔒 Analyzing Security Reports with Correct Severity Parsing..."
+          echo "🔒 Analyzing Security Reports..."
           FAIL=0
           TOTAL_CRITICAL=0
           TOTAL_HIGH=0
           VULNERABILITIES=""
           
-          # Function to parse SARIF file with correct severity mapping
           parse_sarif() {
             local file=$1
             local tool=$2
@@ -242,7 +241,7 @@ jobs:
                 # Trivy stores severity in the message text, not in properties
                 local severity="UNKNOWN"
                 
-                # Extract severity from message text (the correct way for Trivy)
+                # Extract severity from message text 
                 if echo "$message" | grep -qi "Severity: CRITICAL"; then
                   severity="CRITICAL"
                 elif echo "$message" | grep -qi "Severity: HIGH"; then
