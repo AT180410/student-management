@@ -74,7 +74,7 @@ jobs:
           path: trivy-deps-report.sarif
   
       - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-deps-report.sarif
 
@@ -143,7 +143,7 @@ jobs:
           path: trivy-container-report.sarif
   
       - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-container-report.sarif
 
@@ -167,7 +167,7 @@ jobs:
           name: checkov-report
           path: checkov-results.sarif
       - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: checkov-results.sarif
 
