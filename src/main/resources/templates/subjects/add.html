@@ -28,6 +28,7 @@
                     </div>
                     <div class="card-body">
                         <form th:action="@{/subjects/add}" th:object="${subject}" method="post">
+                            <input type="hidden" name="_csrf" value="${_csrf.token}">
                             <div class="mb-3">
                                 <label for="subjectCode" class="form-label">Mã Môn học *</label>
                                 <input type="text" class="form-control" id="subjectCode" 
