@@ -28,6 +28,7 @@
                     </div>
                     <div class="card-body">
                         <form th:action="@{/scores/edit/{id}(id=${score.id})}" method="post">
+                            <input type="hidden" name="_csrf" value="${_csrf.token}">
                             <div class="mb-3">
                                 <label for="student" class="form-label">Sinh viên *</label>
                                 <select class="form-select" id="student" name="studentId" required>
