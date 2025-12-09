@@ -9,15 +9,16 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+
         http
-                .csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/", "/index", "/css/**", "/js/**").permitAll()
-                        .anyRequest().authenticated()
-                )
-                .formLogin(form -> form.permitAll())
-                .logout(logout -> logout.permitAll());
+            .csrf(csrf -> csrf.disable())            // Bỏ CSRF để form POST không bị 403
+            .authorizeHttpRequests(auth -> auth
+                .anyRequest().permitAll()           // Cho phép toàn bộ request
+            )
+            .headers(headers -> headers
+                .frameOptions(frame -> frame.sameOrigin()) // Cho phép H2 Console nếu dùng
+            );
 
         return http.build();
     }
