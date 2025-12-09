@@ -1,4 +1,4 @@
-package com.studentmanagement.security;
+package com.studentmanagement;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
